@@ -1,0 +1,10 @@
+# Build output
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Local test artifacts
+app.log
+*.png.tmp

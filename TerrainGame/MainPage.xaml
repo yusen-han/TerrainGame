@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="TerrainGame.MainPage"
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="Black">
+
+    <Grid>
+
+        <GraphicsView x:Name="GameView"
+                      HorizontalOptions="Fill"
+                      VerticalOptions="Fill">
+            <GraphicsView.GestureRecognizers>
+                <PointerGestureRecognizer PointerPressed="OnPointerPressed"
+                                          PointerMoved="OnPointerMoved"
+                                          PointerReleased="OnPointerReleased" />
+            </GraphicsView.GestureRecognizers>
+        </GraphicsView>
+
+        <Label x:Name="StatusLabel"
+               Text="Initializing Vulkan…"
+               TextColor="White"
+               FontSize="12"
+               Margin="12"
+               HorizontalOptions="Start"
+               VerticalOptions="Start" />
+
+        <VerticalStackLayout HorizontalOptions="Start"
+                             VerticalOptions="Start"
+                             Margin="12,42,0,0"
+                             Spacing="6">
+            <HorizontalStackLayout Spacing="6">
+                <Button Text="Fwd" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+                <Button Text="Back" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Spacing="6">
+                <Button Text="Left" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+                <Button Text="Right" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Spacing="6">
+                <Button Text="Up" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+                <Button Text="Down" WidthRequest="64" HeightRequest="38" FontSize="11"
+                        Pressed="OnMovePressed" Released="OnMoveReleased" />
+            </HorizontalStackLayout>
+        </VerticalStackLayout>
+    </Grid>
+
+</ContentPage>
