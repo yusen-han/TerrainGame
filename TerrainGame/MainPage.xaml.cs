@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
+using SkiaSharp;
+using SkiaSharp.Views.Maui;
 using TerrainGame.Graphics;
 using TerrainGame.Terrain;
 
@@ -27,10 +29,14 @@ public partial class MainPage : ContentPage
 
     private VulkanRenderer? _renderer;
     private ChunkStreamer? _streamer;
-    private FrameDrawable? _frameDrawable;
+    private SKBitmap? _frameBitmap;
+    private GCHandle _pixelHandle;
     private IDispatcherTimer? _timer;
     private TimeSpan _lastFrame;
     private int _frameCount;
+    private int _fpsFrames;
+    private TimeSpan _fpsWindowStart;
+    private double _fps;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -54,13 +60,23 @@ public partial class MainPage : ContentPage
     {
         if (_renderer is not null)
             return;
-        _frameDrawable = new FrameDrawable();
-        GameView.Drawable = _frameDrawable;
 
         try
         {
             _renderer = new VulkanRenderer(FrameWidth, FrameHeight);
             _streamer = new ChunkStreamer(seed: 1337, radius: 4);
+
+            // The renderer writes into its own BGRA buffer; wrap it instead of copying.
+            _pixelHandle = GCHandle.Alloc(_renderer.Pixels, GCHandleType.Pinned);
+            _frameBitmap = new SKBitmap();
+            var info = new SKImageInfo(
+                _renderer.Width,
+                _renderer.Height,
+                SKColorType.Bgra8888,
+                SKAlphaType.Opaque);
+
+            if (!_frameBitmap.InstallPixels(info, _pixelHandle.AddrOfPinnedObject(), info.RowBytes))
+                throw new InvalidOperationException("Failed to install the frame pixels into an SKBitmap.");
         }
         catch (Exception ex)
         {
@@ -69,8 +85,9 @@ public partial class MainPage : ContentPage
         }
 
         _lastFrame = _clock.Elapsed;
+        _fpsWindowStart = _lastFrame;
         _timer = Dispatcher.CreateTimer();
-        _timer.Interval = TimeSpan.FromMilliseconds(50);
+        _timer.Interval = TimeSpan.FromMilliseconds(33);
         _timer.Tick += (_, _) => RenderFrame();
         _timer.Start();
     }
@@ -98,16 +115,24 @@ public partial class MainPage : ContentPage
 
             _renderer.SetCamera(view * projection, _camera.Position);
 
-            var pixels = _renderer.Render();
-            var png = PngEncoder.EncodeBgra(pixels, _renderer.Width, _renderer.Height);
-            _frameDrawable?.SetFrame(png);
-            GameView.Invalidate();
+            _renderer.Render();
+            _frameBitmap?.NotifyPixelsChanged();
+            GameView.InvalidateSurface();
 
             _frameCount++;
+            _fpsFrames++;
+            var fpsElapsed = now - _fpsWindowStart;
+            if (fpsElapsed.TotalSeconds >= 1.0)
+            {
+                _fps = _fpsFrames / fpsElapsed.TotalSeconds;
+                _fpsFrames = 0;
+                _fpsWindowStart = now;
+            }
+
             if (_frameCount % 4 == 0)
             {
                 StatusLabel.Text =
-                    $"chunks {_renderer.ChunkCount}  " +
+                    $"chunks {_renderer.ChunkCount}  fps {_fps:F0}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}";
             }
         }
@@ -201,15 +226,39 @@ public partial class MainPage : ContentPage
         _lastPointer = null;
     }
 
+    private void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
+    {
+        var canvas = e.Surface.Canvas;
+        canvas.Clear(SKColors.Black);
+
+        if (_frameBitmap is null || _frameBitmap.Width == 0)
+            return;
+
+        var info = e.Info;
+        var scale = MathF.Max(info.Width / (float)_frameBitmap.Width, info.Height / (float)_frameBitmap.Height);
+        var width = _frameBitmap.Width * scale;
+        var height = _frameBitmap.Height * scale;
+        var left = (info.Width - width) / 2f;
+        var top = (info.Height - height) / 2f;
+
+        var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
+        canvas.DrawBitmap(_frameBitmap, new SKRect(left, top, left + width, top + height), sampling);
+    }
+
     private void OnUnloaded(object? sender, EventArgs e)
     {
         _timer?.Stop();
         _timer = null;
+
+        // The bitmap wraps the renderer's pinned pixel buffer, so release it first.
+        _frameBitmap?.Dispose();
+        _frameBitmap = null;
+        if (_pixelHandle.IsAllocated)
+            _pixelHandle.Free();
+
         _streamer?.Dispose();
         _streamer = null;
         _renderer?.Dispose();
         _renderer = null;
-        _frameDrawable?.Dispose();
-        _frameDrawable = null;
     }
 }
