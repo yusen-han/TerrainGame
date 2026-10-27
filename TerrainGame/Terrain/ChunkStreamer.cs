@@ -27,16 +27,35 @@ public sealed class ChunkStreamer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task[] _workers;
 
-    public ChunkStreamer(int seed, int radius = 4, int workerCount = 3)
+    public ChunkStreamer(int seed, VoxelEdits edits, int radius = 4, int workerCount = 3)
     {
-        _generator = new TerrainGenerator(seed);
+        Edits = edits;
+        Generator = new TerrainGenerator(seed, edits);
+        _generator = Generator;
         _radius = radius;
         _workers = new Task[workerCount];
         for (var i = 0; i < workerCount; i++)
             _workers[i] = Task.Run(WorkerAsync);
     }
 
+    public TerrainGenerator Generator { get; }
+    public VoxelEdits Edits { get; }
+
     public int Radius => _radius;
+
+    /// <summary>Queues a rebuild for every chunk the brush can touch.</summary>
+    public void RebuildAround(Vector3 center, float radius)
+    {
+        var chunkWorldSize = TerrainGenerator.ChunkSize * TerrainGenerator.VoxelSize;
+        var minX = (int)MathF.Floor((center.X - radius) / chunkWorldSize);
+        var maxX = (int)MathF.Floor((center.X + radius) / chunkWorldSize);
+        var minZ = (int)MathF.Floor((center.Z - radius) / chunkWorldSize);
+        var maxZ = (int)MathF.Floor((center.Z + radius) / chunkWorldSize);
+
+        for (var z = minZ; z <= maxZ; z++)
+        for (var x = minX; x <= maxX; x++)
+            _requests.Writer.TryWrite(TerrainGenerator.ChunkKey(x, z));
+    }
 
     /// <summary>Requests chunks around <paramref name="position"/> and queues distant ones for removal.</summary>
     public void Update(Vector3 position)

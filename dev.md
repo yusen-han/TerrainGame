@@ -9,8 +9,10 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | MAUI shell, window, life cycle | Done |
 | Off-screen Vulkan renderer (image → CPU pixels → `SKCanvasView`) | Done |
 | HLSL shaders compiled to SPIR-V, embedded in the assembly | Done |
-| Custom noise + Marching Cubes terrain | Done |
+| Custom 3D noise + Marching Cubes terrain | Done |
 | 3D pipeline: vertex buffers, depth buffer, uniform buffer, lighting, fog | Done |
+| Terrain materials (sand / dirt / stone) per vertex | Done |
+| Hold-to-dig with volumetric caves (persistent voxel edits) | Done |
 | Streaming chunks around the player on background workers | Done |
 | Fly camera + pointer-look + on-screen movement buttons | Done |
 | SkiaSharp presentation (SKBitmap over the readback buffer, zero-copy) | Done |
@@ -21,13 +23,16 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 ## Architecture
 | Project path | Responsibility |
 |--------------|----------------|
-| `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, wrapping the readback buffer in an `SKBitmap` and invalidating the `SKCanvasView` |
+| `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, dig raycast, wrapping the readback buffer in an `SKBitmap` and invalidating the `SKCanvasView` |
 | `TerrainGame/Graphics/VulkanRenderer.cs` | Headless Vulkan: instance/device, color + depth targets, render pass, pipeline, chunk vertex buffers, uniform buffer, readback, row flip |
 | `TerrainGame/Graphics/CameraController.cs` | Free-fly camera (no gravity), yaw/pitch, view matrix |
-| `TerrainGame/Terrain/TerrainGenerator.cs` | Seeded fBm Perlin heightfield → 17³ density grid with a soft vertical clamp |
+| `TerrainGame/Terrain/Noise3D.cs` | Seeded 3D Perlin noise |
+| `TerrainGame/Terrain/TerrainGenerator.cs` | 3D fBm density field (no heightmap) → voxel grid → Marching Cubes, plus material selection |
+| `TerrainGame/Terrain/VoxelEdits.cs` | Sparse persistent voxel density deltas; digging subtracts a brush volume |
+| `TerrainGame/Terrain/TerrainMaterial.cs` | Sand / Dirt / Stone IDs shared with the shader |
 | `TerrainGame/Terrain/MarchingCubes.cs` | Table-free Marching Cubes: per-face intersections stitched into loops, loop fan triangulation, orientation from the density gradient |
-| `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, ready/removal queues |
-| `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V) |
+| `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, rebuild requests after digging, ready/removal queues |
+| `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V), material palette, lighting, fog |
 
 ### Frame flow
 1. Update camera from input.
@@ -50,7 +55,7 @@ cd TerrainGame/bin/Debug/net10.0-windows10.0.19041.0/win-x64
 ```
 
 ### Compiling the shaders
-SPIR-V binaries are committed so the project builds without extra tooling. To regenerate after editing `Shaders/terrain.hlsl` you need `dxc` **with SPIR-V support** (the Windows SDK copy does not have it; download the official DirectXShaderCompiler release):
+SPIR-V binaries are committed so the project builds without extra tooling. To regenerate after editing `Shaders/terrain.hlsl` you need `dxc` **with SPIR-V support** — the Windows SDK copy does not have it. Either download the official DirectXShaderCompiler release, or take `build/native/bin/x64/dxc.exe` from the `Microsoft.Direct3D.DXC` NuGet package (this is what was used):
 
 ```bash
 dxc -spirv -T vs_6_0 -E VSMain -Zpr -Fo terrain.vert.spv terrain.hlsl
@@ -61,12 +66,20 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 ## Controls
 - Drag on the image: look around (yaw/pitch).
 - `Fwd` / `Back`: move along the view direction; `Left` / `Right`: strafe; `Up` / `Down`: rise/sink. Gravity is not simulated.
+- **Dig**: press and hold the left mouse button / touch for more than one second. The crosshair turns orange while held and a brush is carved at the crosshair every 350 ms. Works on the surface and underground (caves).
 - Start position: `(0, 16, 0)` looking slightly down at the terrain.
 
+## Terrain model
+- Density field: `BaseDensity(x,y,z) = -y*0.55 + fBm3D(x,y,z)*7` (positive = solid). No heightmap; overhangs, arches and caves come straight out of the noise.
+- Chunks sample that field into a 17³ grid, then Marching Cubes builds the mesh.
+- Digging subtracts a smooth spherical brush from world-space voxel samples. The sparse deltas live in `VoxelEdits` and are applied on every chunk build, so edits survive chunk unload/reload and can carve enclosed caves.
+- Material IDs are written per vertex from slope and altitude: steep or high → Stone, mid → Dirt, low flat → Sand. The shader maps IDs to flat colours.
+
 ## Known Issues / Limits
-- **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The PNG encode/decode step is gone; the next step would be uploading the pixels as a GPU texture instead of reading them back.
+- **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The next step would be uploading the pixels as a GPU texture instead of reading them back.
+- **Edits are memory-only**: digging is persisted for the session but not saved to disk; restarting regenerates the untouched world.
 - **No collision**: the camera can fly through terrain.
-- **Chunks are one voxel layer tall** (y ∈ [-8, 8]); the height function is soft-clamped so the surface never leaves the grid. Taller worlds need vertical chunk layers.
+- **Chunks are one voxel layer tall** (y ∈ [-8, 8]); digging outside that band has no visible effect.
 - **No MSAA**: distant terrain shows some shimmering.
 - **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports a page size in physical pixels while WinUI scales the content, so the UI is drawn enlarged and clipped. Layout is anchored top-left so all controls remain reachable; the same layout is correct on other devices. Not addressed in game code (would require platform-specific fixes).
 - Android is built but not yet exercised on hardware; Vulkan availability and driver behaviour still need testing.

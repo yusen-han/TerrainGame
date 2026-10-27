@@ -14,6 +14,7 @@ struct VSInput
 {
     float3 Position : POSITION;
     float3 Normal   : NORMAL;
+    float  Material : MATERIAL;
 };
 
 struct VSOutput
@@ -21,6 +22,7 @@ struct VSOutput
     float4 ClipPosition  : SV_Position;
     float3 Normal        : NORMAL;
     float3 WorldPosition : TEXCOORD0;
+    nointerpolation float Material : TEXCOORD1;
 };
 
 VSOutput VSMain(VSInput input)
@@ -29,7 +31,19 @@ VSOutput VSMain(VSInput input)
     output.ClipPosition = mul(float4(input.Position, 1.0), ViewProjection);
     output.Normal = input.Normal;
     output.WorldPosition = input.Position;
+    output.Material = input.Material;
     return output;
+}
+
+float3 MaterialColor(float material)
+{
+    if (material < 0.5)
+        return float3(0.78, 0.71, 0.50); // sand
+
+    if (material < 1.5)
+        return float3(0.42, 0.31, 0.20); // dirt
+
+    return float3(0.47, 0.47, 0.50);     // stone
 }
 
 float4 PSMain(VSOutput input) : SV_Target
@@ -41,14 +55,7 @@ float4 PSMain(VSOutput input) : SV_Target
     float diffuse = saturate(dot(normal, lightDirection));
     float rim = pow(1.0 - saturate(dot(normal, viewDirection)), 3.0);
 
-    float3 grass = float3(0.22, 0.42, 0.16);
-    float3 rock  = float3(0.42, 0.40, 0.38);
-    float3 snow  = float3(0.92, 0.94, 0.97);
-
-    float steepness = saturate((1.0 - normal.y) * 2.4);
-    float3 color = lerp(grass, rock, steepness);
-    color = lerp(color, snow, saturate((input.WorldPosition.y - 3.5) / 3.0));
-
+    float3 color = MaterialColor(input.Material);
     float3 lighting = 0.32 + 0.68 * diffuse;
     color = color * lighting + rim * 0.05;
 

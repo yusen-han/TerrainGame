@@ -8,3 +8,6 @@ obj/
 # Local test artifacts
 app.log
 *.png.tmp
+
+# Local tooling (shader compiler, etc.)
+.tools/

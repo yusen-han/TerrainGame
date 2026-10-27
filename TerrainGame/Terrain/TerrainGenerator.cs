@@ -4,8 +4,9 @@ using System.Numerics;
 namespace TerrainGame.Terrain;
 
 /// <summary>
-/// In-house procedural terrain: fBm Perlin heightfield sampled into a 3D density
-/// grid, polygonised with <see cref="MarchingCubes"/>.
+/// Fully volumetric terrain: a 3D fBm density field sampled into a voxel grid and
+/// polygonised with <see cref="MarchingCubes"/>. There is no heightmap; caves,
+/// overhangs and floating rock are all directly representable.
 /// </summary>
 public sealed class TerrainGenerator
 {
@@ -14,35 +15,41 @@ public sealed class TerrainGenerator
     public const int SampleCount = ChunkSize + 1;
     public const int BaseY = -8;
 
-    private readonly Noise2D _baseNoise;
-    private readonly Noise2D _detailNoise;
+    private readonly Noise3D _noise;
+    private readonly Noise3D _detailNoise;
+    private readonly VoxelEdits _edits;
 
-    public TerrainGenerator(int seed)
+    public TerrainGenerator(int seed, VoxelEdits edits)
     {
-        _baseNoise = new Noise2D(seed);
-        _detailNoise = new Noise2D(unchecked(seed * 7919 + 13));
+        _noise = new Noise3D(seed);
+        _detailNoise = new Noise3D(unchecked(seed * 7919 + 13));
+        _edits = edits;
     }
 
-    public float Height(float worldX, float worldZ)
+    /// <summary>
+    /// Density before digging. Positive is solid. The vertical term gives the world
+    /// a ground plane; the 3D noise supplies hills, cliffs, overhangs and caves.
+    /// </summary>
+    public float BaseDensity(float worldX, float worldY, float worldZ)
     {
         var amplitude = 1f;
-        var frequency = 0.009f;
-        var height = 0f;
+        var frequency = 0.018f;
+        var noise = 0f;
 
-        for (var octave = 0; octave < 6; octave++)
+        for (var octave = 0; octave < 5; octave++)
         {
-            height += _baseNoise.Sample(worldX * frequency, worldZ * frequency) * amplitude;
+            noise += _noise.Sample(worldX * frequency, worldY * frequency, worldZ * frequency) * amplitude;
             amplitude *= 0.5f;
-            frequency *= 2.0f;
+            frequency *= 2.05f;
         }
 
-        height *= 7f;
-        height += _detailNoise.Sample(worldX * 0.07f, worldZ * 0.07f) * 1.5f;
+        noise += _detailNoise.Sample(worldX * 0.11f, worldY * 0.11f, worldZ * 0.11f) * 0.35f;
 
-        // Soft-clamp so the surface always stays inside the chunk's vertical range.
-        const float limit = 7.6f;
-        return limit * MathF.Tanh(height / limit);
+        return -worldY * 0.55f + noise * 7f;
     }
+
+    public float DensityAt(Vector3 position)
+        => BaseDensity(position.X, position.Y, position.Z) + _edits.SampleDelta(position);
 
     public TerrainVertex[] GenerateChunk(int chunkX, int chunkZ)
     {
@@ -51,15 +58,40 @@ public sealed class TerrainGenerator
 
         for (var z = 0; z < SampleCount; z++)
         {
+            var worldZ = origin.Z + z * VoxelSize;
+            var voxelZ = (int)worldZ;
+
             for (var x = 0; x < SampleCount; x++)
             {
-                var height = Height(origin.X + x * VoxelSize, origin.Z + z * VoxelSize);
+                var worldX = origin.X + x * VoxelSize;
+                var voxelX = (int)worldX;
+
                 for (var y = 0; y < SampleCount; y++)
-                    density[x, y, z] = height - (origin.Y + y * VoxelSize);
+                {
+                    var worldY = origin.Y + y * VoxelSize;
+                    var voxelY = (int)worldY;
+                    density[x, y, z] = BaseDensity(worldX, worldY, worldZ)
+                                       + _edits.GetDelta(voxelX, voxelY, voxelZ);
+                }
             }
         }
 
-        return MarchingCubes.Generate(density, origin, VoxelSize);
+        var vertices = MarchingCubes.Generate(density, origin, VoxelSize);
+
+        for (var i = 0; i < vertices.Length; i++)
+            vertices[i].Material = SelectMaterial(vertices[i].Position, vertices[i].Normal);
+
+        return vertices;
+    }
+
+    private static float SelectMaterial(Vector3 position, Vector3 normal)
+    {
+        if (normal.Y < 0.6f || position.Y > 3f)
+            return (float)TerrainMaterial.Stone;
+
+        return position.Y > -1f
+            ? (float)TerrainMaterial.Dirt
+            : (float)TerrainMaterial.Sand;
     }
 
     public static long ChunkKey(int chunkX, int chunkZ) => ((long)chunkX << 32) ^ (uint)chunkZ;
