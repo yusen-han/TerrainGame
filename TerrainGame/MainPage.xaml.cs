@@ -189,7 +189,7 @@ public partial class MainPage : ContentPage
         if (_streamer is null)
             return false;
 
-        const float step = 0.4f;
+        const float step = 0.25f;
         const float maxDistance = 80f;
 
         var previousDensity = _streamer.Generator.DensityAt(origin);

@@ -53,25 +53,27 @@ public static class MarchingCubes
     /// </summary>
     public static TerrainVertex[] Generate(float[,,] density, Vector3 origin, float voxelSize)
     {
-        var sampleCount = density.GetLength(0);
-        var cellCount = sampleCount - 1;
-        if (density.GetLength(1) != sampleCount || density.GetLength(2) != sampleCount)
-            throw new ArgumentException("Density grid must be cubic.", nameof(density));
+        var samplesX = density.GetLength(0);
+        var samplesY = density.GetLength(1);
+        var samplesZ = density.GetLength(2);
+        var cellsX = samplesX - 1;
+        var cellsY = samplesY - 1;
+        var cellsZ = samplesZ - 1;
 
-        var positions = new List<Vector3>(1024);
-        var vertices = new List<TerrainVertex>(3072);
-        var edgeCache = new Dictionary<long, int>(4096);
+        var positions = new List<Vector3>(2048);
+        var vertices = new List<TerrainVertex>(6144);
+        var edgeCache = new Dictionary<long, int>(8192);
 
         Span<float> cornerDensity = stackalloc float[8];
         Span<int> edgePoint = stackalloc int[12];
         Span<int> faceEdges = stackalloc int[4];
         Span<bool> inside = stackalloc bool[4];
 
-        for (var k = 0; k < cellCount; k++)
+        for (var k = 0; k < cellsZ; k++)
         {
-            for (var j = 0; j < cellCount; j++)
+            for (var j = 0; j < cellsY; j++)
             {
-                for (var i = 0; i < cellCount; i++)
+                for (var i = 0; i < cellsX; i++)
                 {
                     var mask = 0;
                     for (var c = 0; c < 8; c++)
@@ -108,8 +110,7 @@ public static class MarchingCubes
                         var startY = j + EdgeStart[e, 1];
                         var startZ = k + EdgeStart[e, 2];
 
-                        var key = ((long)startX * sampleCount + startY) * sampleCount * 3
-                                  + startZ * 3 + axis;
+                        var key = (((long)startX * samplesY + startY) * samplesZ + startZ) * 3 + axis;
                         if (!edgeCache.TryGetValue(key, out var index))
                         {
                             var da = cornerDensity[a];

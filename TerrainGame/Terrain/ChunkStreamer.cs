@@ -46,7 +46,7 @@ public sealed class ChunkStreamer : IDisposable
     /// <summary>Queues a rebuild for every chunk the brush can touch.</summary>
     public void RebuildAround(Vector3 center, float radius)
     {
-        var chunkWorldSize = TerrainGenerator.ChunkSize * TerrainGenerator.VoxelSize;
+        var chunkWorldSize = TerrainGenerator.ChunkWorldSize;
         var minX = (int)MathF.Floor((center.X - radius) / chunkWorldSize);
         var maxX = (int)MathF.Floor((center.X + radius) / chunkWorldSize);
         var minZ = (int)MathF.Floor((center.Z - radius) / chunkWorldSize);
@@ -60,7 +60,7 @@ public sealed class ChunkStreamer : IDisposable
     /// <summary>Requests chunks around <paramref name="position"/> and queues distant ones for removal.</summary>
     public void Update(Vector3 position)
     {
-        var chunkWorldSize = TerrainGenerator.ChunkSize * TerrainGenerator.VoxelSize;
+        var chunkWorldSize = TerrainGenerator.ChunkWorldSize;
         var centerX = (int)MathF.Floor(position.X / chunkWorldSize);
         var centerZ = (int)MathF.Floor(position.Z / chunkWorldSize);
 

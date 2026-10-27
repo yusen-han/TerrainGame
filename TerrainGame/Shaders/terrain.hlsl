@@ -38,9 +38,12 @@ VSOutput VSMain(VSInput input)
 float3 MaterialColor(float material)
 {
     if (material < 0.5)
-        return float3(0.78, 0.71, 0.50); // sand
+        return float3(0.30, 0.52, 0.22); // grass
 
     if (material < 1.5)
+        return float3(0.78, 0.71, 0.50); // sand
+
+    if (material < 2.5)
         return float3(0.42, 0.31, 0.20); // dirt
 
     return float3(0.47, 0.47, 0.50);     // stone

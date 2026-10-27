@@ -70,16 +70,16 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 - Start position: `(0, 16, 0)` looking slightly down at the terrain.
 
 ## Terrain model
-- Density field: `BaseDensity(x,y,z) = -y*0.55 + fBm3D(x,y,z)*7` (positive = solid). No heightmap; overhangs, arches and caves come straight out of the noise.
-- Chunks sample that field into a 17³ grid, then Marching Cubes builds the mesh.
-- Digging subtracts a smooth spherical brush from world-space voxel samples. The sparse deltas live in `VoxelEdits` and are applied on every chunk build, so edits survive chunk unload/reload and can carve enclosed caves.
-- Material IDs are written per vertex from slope and altitude: steep or high → Stone, mid → Dirt, low flat → Sand. The shader maps IDs to flat colours.
+- Density field: `BaseDensity(x,y,z) = -y*0.55 + fBm3D(x,y,z)*7`, plus a closure bias that forces solid rock below y = -8 and air above y = 4 (positive = solid). No heightmap; overhangs, arches and caves come straight out of the noise.
+- Chunks are 32 × 48 × 32 cells at 0.5 units (16 × 24 × 16 world units), sampled into a 33 × 49 × 33 grid and meshed with Marching Cubes.
+- Digging subtracts a smooth spherical brush from world-space voxel samples at 0.5-unit spacing. The sparse deltas live in `VoxelEdits` and are applied on every chunk build, so edits survive chunk unload/reload and can carve enclosed caves.
+- Material IDs are written per vertex from slope and altitude: steep or high → Stone, low → Sand, flat → Grass, everything else → Dirt. The shader maps IDs to flat colours.
 
 ## Known Issues / Limits
 - **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The next step would be uploading the pixels as a GPU texture instead of reading them back.
 - **Edits are memory-only**: digging is persisted for the session but not saved to disk; restarting regenerates the untouched world.
 - **No collision**: the camera can fly through terrain.
-- **Chunks are one voxel layer tall** (y ∈ [-8, 8]); digging outside that band has no visible effect.
+- **Bounded world**: each chunk spans y ∈ [-16, 8]; the field is forced solid below -8 and air above 4, so digging outside that band has no visible effect.
 - **No MSAA**: distant terrain shows some shimmering.
 - **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports a page size in physical pixels while WinUI scales the content, so the UI is drawn enlarged and clipped. Layout is anchored top-left so all controls remain reachable; the same layout is correct on other devices. Not addressed in game code (would require platform-specific fixes).
 - Android is built but not yet exercised on hardware; Vulkan availability and driver behaviour still need testing.

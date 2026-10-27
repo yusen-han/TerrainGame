@@ -3,7 +3,8 @@ namespace TerrainGame.Terrain;
 /// <summary>Material IDs; must match the values used by the terrain shader.</summary>
 public enum TerrainMaterial
 {
-    Sand = 0,
-    Dirt = 1,
-    Stone = 2,
+    Grass = 0,
+    Sand = 1,
+    Dirt = 2,
+    Stone = 3,
 }
