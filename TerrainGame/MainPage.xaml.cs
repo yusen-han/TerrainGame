@@ -66,7 +66,7 @@ public partial class MainPage : ContentPage
         try
         {
             _renderer = new VulkanRenderer(FrameWidth, FrameHeight);
-            _streamer = new ChunkStreamer(seed: 98876, edits: new VoxelEdits(), radius: 4);
+            _streamer = new ChunkStreamer(new TerrainWorld(seed: 98876), radius: 4);
 
             // The renderer writes into its own BGRA buffer; wrap it instead of copying.
             _pixelHandle = GCHandle.Alloc(_renderer.Pixels, GCHandleType.Pinned);
@@ -135,7 +135,7 @@ public partial class MainPage : ContentPage
             if (_frameCount % 4 == 0)
             {
                 StatusLabel.Text =
-                    $"chunks {_renderer.ChunkCount}  fps {_fps:F0}  edits {_streamer.Edits.Count}  " +
+                    $"chunks {_renderer.ChunkCount}  fps {_fps:F0}  modified {_streamer.World.ModifiedChunkCount}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}";
             }
         }
@@ -179,8 +179,8 @@ public partial class MainPage : ContentPage
         if (!TryRaycast(origin, direction, out var hit))
             return;
 
-        _streamer.Edits.ApplyBrush(hit, radius: 3.2f, strength: 7f);
-        _streamer.RebuildAround(hit, 4.2f);
+        var touched = _streamer.World.ApplyBrush(hit, radius: 3.2f, strength: 7f);
+        _streamer.Rebuild(touched);
     }
 
     private bool TryRaycast(Vector3 origin, Vector3 direction, out Vector3 hit)
@@ -192,13 +192,13 @@ public partial class MainPage : ContentPage
         const float step = 0.25f;
         const float maxDistance = 80f;
 
-        var previousDensity = _streamer.Generator.DensityAt(origin);
+        var previousDensity = _streamer.World.DensityAt(origin);
         var previousT = 0f;
 
         for (var t = step; t <= maxDistance; t += step)
         {
             var point = origin + direction * t;
-            var density = _streamer.Generator.DensityAt(point);
+            var density = _streamer.World.DensityAt(point);
 
             if (density > 0f && previousDensity <= 0f)
             {
@@ -207,7 +207,7 @@ public partial class MainPage : ContentPage
                 for (var i = 0; i < 8; i++)
                 {
                     var middle = (low + high) * 0.5f;
-                    if (_streamer.Generator.DensityAt(origin + direction * middle) > 0f)
+                    if (_streamer.World.DensityAt(origin + direction * middle) > 0f)
                         high = middle;
                     else
                         low = middle;

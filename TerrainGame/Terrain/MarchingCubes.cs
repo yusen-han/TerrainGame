@@ -51,7 +51,7 @@ public static class MarchingCubes
     /// Builds a triangle soup for the iso-surface <c>density == 0</c>.
     /// Positive density is treated as solid (inside).
     /// </summary>
-    public static TerrainVertex[] Generate(float[,,] density, Vector3 origin, float voxelSize)
+    public static TerrainVertex[] Generate(float[,,] density, byte[,,] material, Vector3 origin, float voxelSize)
     {
         var samplesX = density.GetLength(0);
         var samplesY = density.GetLength(1);
@@ -88,6 +88,19 @@ public static class MarchingCubes
 
                     if (mask == 0 || mask == 255)
                         continue;
+
+                    // Material comes from the stored per-voxel grid: first solid corner.
+                    byte cellMaterial = 0;
+                    for (var c = 0; c < 8; c++)
+                    {
+                        if (((mask >> c) & 1) == 0)
+                            continue;
+
+                        cellMaterial = material[i + (int)CornerOffsets[c].X,
+                                                j + (int)CornerOffsets[c].Y,
+                                                k + (int)CornerOffsets[c].Z];
+                        break;
+                    }
 
                     // Coarse gradient at the cell, used only to orient triangles.
                     var gradient = new Vector3(
@@ -177,7 +190,7 @@ public static class MarchingCubes
                     }
 
                     if (segments.Count >= 3)
-                        TraceLoops(segments, positions, vertices, gradient);
+                        TraceLoops(segments, positions, vertices, gradient, cellMaterial);
                 }
             }
         }
@@ -189,7 +202,8 @@ public static class MarchingCubes
         List<(int A, int B)> segments,
         List<Vector3> positions,
         List<TerrainVertex> vertices,
-        Vector3 gradient)
+        Vector3 gradient,
+        byte material)
     {
         var adjacency = new Dictionary<int, List<int>>(12);
         foreach (var (a, b) in segments)
@@ -236,11 +250,16 @@ public static class MarchingCubes
             }
 
             if (loop.Count >= 3)
-                EmitLoop(loop, positions, vertices, gradient);
+                EmitLoop(loop, positions, vertices, gradient, material);
         }
     }
 
-    private static void EmitLoop(List<int> loop, List<Vector3> positions, List<TerrainVertex> vertices, Vector3 gradient)
+    private static void EmitLoop(
+        List<int> loop,
+        List<Vector3> positions,
+        List<TerrainVertex> vertices,
+        Vector3 gradient,
+        byte material)
     {
         if (loop.Count < 3)
             return;
@@ -250,11 +269,17 @@ public static class MarchingCubes
         {
             var p1 = positions[loop[i]];
             var p2 = positions[loop[i + 1]];
-            AddTriangle(p0, p1, p2, gradient, vertices);
+            AddTriangle(p0, p1, p2, gradient, material, vertices);
         }
     }
 
-    private static void AddTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 gradient, List<TerrainVertex> vertices)
+    private static void AddTriangle(
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 gradient,
+        byte material,
+        List<TerrainVertex> vertices)
     {
         var normal = Vector3.Cross(b - a, c - a);
         if (normal.LengthSquared() < 1e-10f)
@@ -266,8 +291,8 @@ public static class MarchingCubes
         if (Vector3.Dot(normal, gradient) > 0f)
             normal = -normal;
 
-        vertices.Add(new TerrainVertex(a, normal));
-        vertices.Add(new TerrainVertex(b, normal));
-        vertices.Add(new TerrainVertex(c, normal));
+        vertices.Add(new TerrainVertex(a, normal, material));
+        vertices.Add(new TerrainVertex(b, normal, material));
+        vertices.Add(new TerrainVertex(c, normal, material));
     }
 }

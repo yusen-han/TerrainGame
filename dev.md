@@ -26,12 +26,15 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, dig raycast, wrapping the readback buffer in an `SKBitmap` and invalidating the `SKCanvasView` |
 | `TerrainGame/Graphics/VulkanRenderer.cs` | Headless Vulkan: instance/device, color + depth targets, render pass, pipeline, chunk vertex buffers, uniform buffer, readback, row flip |
 | `TerrainGame/Graphics/CameraController.cs` | Free-fly camera (no gravity), yaw/pitch, view matrix |
-| `TerrainGame/Terrain/Noise3D.cs` | Seeded 3D Perlin noise |
-| `TerrainGame/Terrain/TerrainGenerator.cs` | 3D fBm density field (no heightmap) → voxel grid → Marching Cubes, plus material selection |
-| `TerrainGame/Terrain/VoxelEdits.cs` | Sparse persistent voxel density deltas; digging subtracts a brush volume |
-| `TerrainGame/Terrain/TerrainMaterial.cs` | Sand / Dirt / Stone IDs shared with the shader |
-| `TerrainGame/Terrain/MarchingCubes.cs` | Table-free Marching Cubes: per-face intersections stitched into loops, loop fan triangulation, orientation from the density gradient |
-| `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, rebuild requests after digging, ready/removal queues |
+| `TerrainGame/Terrain/Noise2D.cs` | Seeded 2D Perlin noise (base height) |
+| `TerrainGame/Terrain/Noise3D.cs` | Seeded 3D Perlin noise (sparse cave carving) |
+| `TerrainGame/Terrain/TerrainHeightField.cs` | 2D fBm height with rain/droplet erosion; world-aligned cached tiles with border blending |
+| `TerrainGame/Terrain/TerrainGenerator.cs` | Fills `ChunkData` from the height field, carves sparse caves, writes per-voxel materials, meshes chunks |
+| `TerrainGame/Terrain/ChunkData.cs` | Dense 3D density grid + per-voxel material grid for one chunk |
+| `TerrainGame/Terrain/TerrainWorld.cs` | Owns the chunk grids; digging writes directly into them, modified chunks survive unload, trilinear density sampling |
+| `TerrainGame/Terrain/TerrainMaterial.cs` | Grass / Sand / Dirt / Stone IDs shared with the shader |
+| `TerrainGame/Terrain/MarchingCubes.cs` | Table-free Marching Cubes: per-face intersections stitched into loops, loop fan triangulation, orientation from the density gradient; emits the stored per-voxel material |
+| `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, rebuild requests after digging, releases chunks through `TerrainWorld` |
 | `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V), material palette, lighting, fog |
 
 ### Frame flow
@@ -70,16 +73,17 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 - Start position: `(0, 16, 0)` looking slightly down at the terrain.
 
 ## Terrain model
-- Density field: `BaseDensity(x,y,z) = -y*0.55 + fBm3D(x,y,z)*7`, plus a closure bias that forces solid rock below y = -8 and air above y = 4 (positive = solid). No heightmap; overhangs, arches and caves come straight out of the noise.
-- Chunks are 32 × 48 × 32 cells at 0.5 units (16 × 24 × 16 world units), sampled into a 33 × 49 × 33 grid and meshed with Marching Cubes.
-- Digging subtracts a smooth spherical brush from world-space voxel samples at 0.5-unit spacing. The sparse deltas live in `VoxelEdits` and are applied on every chunk build, so edits survive chunk unload/reload and can carve enclosed caves.
-- Material IDs are written per vertex from slope and altitude: steep or high → Stone, low → Sand, flat → Grass, everything else → Dirt. The shader maps IDs to flat colours.
+- **Generation**: a 2D fBm height field (`8 * tanh(fbm * 1.2)`) is refined with rain/droplet erosion over world-aligned 64-unit tiles (16-unit padding, cached). Sampling blends neighbouring tiles along an 8-unit border band, so chunk meshes never crack.
+- **Storage**: each chunk keeps a dense 33 × 49 × 33 grid (0.5-unit spacing, 16 × 24 × 16 world units) of `float Density` plus a `byte Material` grid (`ChunkData`). Positive density is solid.
+- **Fill**: `density = HeightAt(x,z) - y`, with a sparse cave term (single-octave 3D noise thresholded at 0.55, scaled by 30 and gated to depths of 3–7 units) that leaves occasional pockets and tunnels, never a sponge.
+- **Digging**: the brush subtracts directly from `ChunkData.Density` in every affected chunk and marks it modified. Modified chunks are kept when they stream out; clean chunks regenerate identically.
+- **Materials** are stored per voxel at generation time: steep or deep → Stone, low near-surface → Sand, near-surface flat → Grass, otherwise Dirt. Marching Cubes reads the material of the solid cell and writes it into the vertex; the shader maps IDs to flat colours.
 
 ## Known Issues / Limits
 - **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The next step would be uploading the pixels as a GPU texture instead of reading them back.
-- **Edits are memory-only**: digging is persisted for the session but not saved to disk; restarting regenerates the untouched world.
+- **Modified chunks are memory-only**: digging survives streaming but not an app restart; there is no disk save yet. Modified chunk grids also stay in memory while exploring.
 - **No collision**: the camera can fly through terrain.
-- **Bounded world**: each chunk spans y ∈ [-16, 8]; the field is forced solid below -8 and air above 4, so digging outside that band has no visible effect.
+- **Bounded world**: each chunk spans y ∈ [-16, 8]; digging outside that band has no visible effect.
 - **No MSAA**: distant terrain shows some shimmering.
 - **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports a page size in physical pixels while WinUI scales the content, so the UI is drawn enlarged and clipped. Layout is anchored top-left so all controls remain reachable; the same layout is correct on other devices. Not addressed in game code (would require platform-specific fixes).
 - Android is built but not yet exercised on hardware; Vulkan availability and driver behaviour still need testing.

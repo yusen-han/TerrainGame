@@ -16,7 +16,7 @@ public sealed class ChunkStreamer : IDisposable
 {
     public readonly record struct CompletedChunk(long Key, TerrainVertex[] Vertices);
 
-    private readonly TerrainGenerator _generator;
+    private readonly TerrainWorld _world;
     private readonly int _radius;
     private readonly Channel<long> _requests = Channel.CreateUnbounded<long>();
     private readonly Queue<CompletedChunk> _completed = new();
@@ -27,21 +27,25 @@ public sealed class ChunkStreamer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task[] _workers;
 
-    public ChunkStreamer(int seed, VoxelEdits edits, int radius = 4, int workerCount = 3)
+    public ChunkStreamer(TerrainWorld world, int radius = 4, int workerCount = 3)
     {
-        Edits = edits;
-        Generator = new TerrainGenerator(seed, edits);
-        _generator = Generator;
+        _world = world;
         _radius = radius;
         _workers = new Task[workerCount];
         for (var i = 0; i < workerCount; i++)
             _workers[i] = Task.Run(WorkerAsync);
     }
 
-    public TerrainGenerator Generator { get; }
-    public VoxelEdits Edits { get; }
+    public TerrainWorld World => _world;
 
     public int Radius => _radius;
+
+    /// <summary>Queues a rebuild for every given chunk key.</summary>
+    public void Rebuild(IEnumerable<long> keys)
+    {
+        foreach (var key in keys)
+            _requests.Writer.TryWrite(key);
+    }
 
     /// <summary>Queues a rebuild for every chunk the brush can touch.</summary>
     public void RebuildAround(Vector3 center, float radius)
@@ -85,7 +89,10 @@ public sealed class ChunkStreamer : IDisposable
         }
 
         foreach (var key in _removals)
+        {
             _known.Remove(key);
+            _world.Release((int)(key >> 32), (int)(key & 0xFFFFFFFF));
+        }
     }
 
     /// <summary>Takes generated chunks that are still wanted.</summary>
@@ -117,7 +124,7 @@ public sealed class ChunkStreamer : IDisposable
             {
                 var chunkX = (int)(key >> 32);
                 var chunkZ = (int)(key & 0xFFFFFFFF);
-                var vertices = _generator.GenerateChunk(chunkX, chunkZ);
+                var vertices = _world.BuildMesh(chunkX, chunkZ);
 
                 lock (_completedLock)
                     _completed.Enqueue(new CompletedChunk(key, vertices));
