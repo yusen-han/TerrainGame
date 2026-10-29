@@ -24,7 +24,7 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | Project path | Responsibility |
 |--------------|----------------|
 | `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, dig raycast, wrapping the readback buffer in an `SKBitmap` and invalidating the `SKCanvasView` |
-| `TerrainGame/Graphics/VulkanRenderer.cs` | Headless Vulkan: instance/device, color + depth targets, render pass, pipeline, chunk vertex buffers, uniform buffer, readback, row flip |
+| `TerrainGame/Graphics/VulkanRenderer.cs` | Headless Vulkan: instance/device, color + depth targets, render pass, pipeline, chunk vertex buffers, uniform buffer, material texture array + sampler, readback, row flip |
 | `TerrainGame/Graphics/CameraController.cs` | Free-fly camera (no gravity), yaw/pitch, view matrix |
 | `TerrainGame/Terrain/Noise2D.cs` | Seeded 2D Perlin noise (base height) |
 | `TerrainGame/Terrain/Noise3D.cs` | Seeded 3D Perlin noise (sparse cave carving) |
@@ -35,7 +35,8 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | `TerrainGame/Terrain/TerrainMaterial.cs` | Grass / Sand / Dirt / Stone IDs shared with the shader |
 | `TerrainGame/Terrain/MarchingCubes.cs` | Table-free Marching Cubes: per-face intersections stitched into loops, loop fan triangulation, orientation from the density gradient; emits the stored per-voxel material |
 | `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, rebuild requests after digging, releases chunks through `TerrainWorld` |
-| `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V), material palette, lighting, fog |
+| `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V): triplanar sampling from the material texture array, lighting, fog |
+| `TerrainGame/Resources/Textures/*.png` | Grass / sand / dirt / stone textures, embedded in the assembly and packed into a 2D array image (256×256 per layer) |
 
 ### Frame flow
 1. Update camera from input.
@@ -77,13 +78,15 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 - **Storage**: each chunk keeps a dense 33 × 49 × 33 grid (0.5-unit spacing, 16 × 24 × 16 world units) of `float Density` plus a `byte Material` grid (`ChunkData`). Positive density is solid.
 - **Fill**: `density = HeightAt(x,z) - y`, with a sparse cave term (single-octave 3D noise thresholded at 0.55, scaled by 30 and gated to depths of 3–7 units) that leaves occasional pockets and tunnels, never a sponge.
 - **Digging**: the brush subtracts directly from `ChunkData.Density` in every affected chunk and marks it modified. Modified chunks are kept when they stream out; clean chunks regenerate identically.
-- **Materials** are stored per voxel at generation time: steep or deep → Stone, low near-surface → Sand, near-surface flat → Grass, otherwise Dirt. Marching Cubes reads the material of the solid cell and writes it into the vertex; the shader maps IDs to flat colours.
+- **Materials** are stored per voxel at generation time: steep or deep → Stone, low near-surface → Sand, near-surface flat → Grass, otherwise Dirt. Marching Cubes reads the material of the solid cell and writes it into the vertex.
+- **Texturing**: the four PNGs are decoded with SkiaSharp, resized to 256×256 and uploaded as one `R8G8B8A8_UNORM` 2D array image (layer order = Grass, Sand, Dirt, Stone). Descriptor set: binding 0 uniform buffer, binding 1 sampled image array, binding 2 repeating linear sampler. The pixel shader samples the layer selected by the vertex material with triplanar projection (`0.12` tiles per world unit), so cliffs and cave walls are textured without UVs.
 
 ## Known Issues / Limits
 - **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The next step would be uploading the pixels as a GPU texture instead of reading them back.
 - **Modified chunks are memory-only**: digging survives streaming but not an app restart; there is no disk save yet. Modified chunk grids also stay in memory while exploring.
 - **No collision**: the camera can fly through terrain.
 - **Bounded world**: each chunk spans y ∈ [-16, 8]; digging outside that band has no visible effect.
+- **Textures are basic**: 256×256, no mipmaps, no normal/roughness maps, and the source images are not seamless so tiling is visible up close. Triplanar projection can look slightly soft on 45° slopes.
 - **No MSAA**: distant terrain shows some shimmering.
 - **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports a page size in physical pixels while WinUI scales the content, so the UI is drawn enlarged and clipped. Layout is anchored top-left so all controls remain reachable; the same layout is correct on other devices. Not addressed in game code (would require platform-specific fixes).
 - Android is built but not yet exercised on hardware; Vulkan availability and driver behaviour still need testing.

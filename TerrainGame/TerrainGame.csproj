@@ -76,6 +76,8 @@
 	<ItemGroup>
 		<!-- HLSL shaders precompiled to SPIR-V (see Shaders/terrain.hlsl for the dxc commands). -->
 		<EmbeddedResource Include="Shaders\*.spv" LogicalName="TerrainGame.Shaders.%(Filename)%(Extension)" />
+		<!-- Terrain material textures, packed into a texture array by the renderer. -->
+		<EmbeddedResource Include="Resources\Textures\*.png" LogicalName="TerrainGame.Textures.%(Filename)%(Extension)" />
 	</ItemGroup>
 
 </Project>

@@ -10,6 +10,10 @@ cbuffer Scene : register(b0)
     float4 CameraPosition;
 };
 
+// Layer order matches TerrainMaterial: grass, sand, dirt, stone.
+Texture2DArray TerrainTextures : register(t1);
+SamplerState TerrainSampler : register(s2);
+
 struct VSInput
 {
     float3 Position : POSITION;
@@ -35,18 +39,18 @@ VSOutput VSMain(VSInput input)
     return output;
 }
 
-float3 MaterialColor(float material)
+float3 SampleTriplanar(float3 position, float3 normal, float layer)
 {
-    if (material < 0.5)
-        return float3(0.30, 0.52, 0.22); // grass
+    float3 blend = pow(abs(normal), 4.0);
+    blend /= max(blend.x + blend.y + blend.z, 1e-4);
 
-    if (material < 1.5)
-        return float3(0.78, 0.71, 0.50); // sand
+    const float scale = 0.12;
 
-    if (material < 2.5)
-        return float3(0.42, 0.31, 0.20); // dirt
+    float3 x = TerrainTextures.Sample(TerrainSampler, float3(position.zy * scale, layer)).rgb;
+    float3 y = TerrainTextures.Sample(TerrainSampler, float3(position.xz * scale, layer)).rgb;
+    float3 z = TerrainTextures.Sample(TerrainSampler, float3(position.xy * scale, layer)).rgb;
 
-    return float3(0.47, 0.47, 0.50);     // stone
+    return x * blend.x + y * blend.y + z * blend.z;
 }
 
 float4 PSMain(VSOutput input) : SV_Target
@@ -58,9 +62,11 @@ float4 PSMain(VSOutput input) : SV_Target
     float diffuse = saturate(dot(normal, lightDirection));
     float rim = pow(1.0 - saturate(dot(normal, viewDirection)), 3.0);
 
-    float3 color = MaterialColor(input.Material);
+    float layer = round(input.Material);
+    float3 albedo = SampleTriplanar(input.WorldPosition, normal, layer);
+
     float3 lighting = 0.32 + 0.68 * diffuse;
-    color = color * lighting + rim * 0.05;
+    float3 color = albedo * lighting + rim * 0.03;
 
     // Distance fog: blends distant chunks into the sky and hides stream-in edges.
     float distanceToCamera = length(CameraPosition.xyz - input.WorldPosition);

@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Silk.NET.Core;
 using Silk.NET.Vulkan;
+using SkiaSharp;
 using TerrainGame.Terrain;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 using VkDevice = Silk.NET.Vulkan.Device;
@@ -74,6 +75,13 @@ public sealed unsafe class VulkanRenderer : IDisposable
     private const ulong UniformSize = 80;
     private SceneUniform _scene;
 
+    private VkImage _textureImage;
+    private DeviceMemory _textureMemory;
+    private ImageView _textureView;
+    private Sampler _textureSampler;
+    private const uint TextureSize = 256;
+    private const uint TextureLayerCount = 4;
+
     private readonly Dictionary<long, ChunkGpu> _chunks = new();
     private readonly List<(long Key, TerrainVertex[] Vertices)> _pendingUploads = new();
     private readonly List<long> _pendingRemovals = new();
@@ -104,9 +112,10 @@ public sealed unsafe class VulkanRenderer : IDisposable
         CreateUniformBuffer();
         CreateRenderPass();
         CreateFramebuffer();
+        CreateCommandResources();
+        CreateTerrainTextures();
         CreateDescriptorResources();
         CreatePipeline();
-        CreateCommandResources();
     }
 
     private void CreateInstance()
@@ -463,38 +472,241 @@ public sealed unsafe class VulkanRenderer : IDisposable
             throw new InvalidOperationException($"vkCreateFramebuffer failed: {result}");
     }
 
+    /// <summary>
+    /// Decodes the embedded material textures and uploads them as one 2D array
+    /// image (layer order = TerrainMaterial), with a repeating linear sampler.
+    /// </summary>
+    private void CreateTerrainTextures()
+    {
+        var layers = new[]
+        {
+            LoadTextureLayer("TerrainGame.Textures.grass.png"),
+            LoadTextureLayer("TerrainGame.Textures.sand.png"),
+            LoadTextureLayer("TerrainGame.Textures.dirt.png"),
+            LoadTextureLayer("TerrainGame.Textures.stone.png"),
+        };
+
+        var layerBytes = (int)(TextureSize * TextureSize * 4);
+        var bufferSize = (ulong)(layerBytes * (int)TextureLayerCount);
+
+        var staging = CreateBuffer(bufferSize, BufferUsageFlags.TransferSrcBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, out var stagingMemory);
+
+        void* mapped = null;
+        var result = _vk.MapMemory(_device, stagingMemory, 0, bufferSize, 0, &mapped);
+        if (result != Result.Success)
+            throw new InvalidOperationException($"vkMapMemory (textures) failed: {result}");
+
+        try
+        {
+            for (var i = 0; i < layers.Length; i++)
+                Marshal.Copy(layers[i], 0, (IntPtr)((byte*)mapped + i * layerBytes), layerBytes);
+        }
+        finally
+        {
+            _vk.UnmapMemory(_device, stagingMemory);
+        }
+
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type2D,
+            Format = Format.R8G8B8A8Unorm,
+            Extent = new Extent3D(TextureSize, TextureSize, 1),
+            MipLevels = 1,
+            ArrayLayers = TextureLayerCount,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined,
+        };
+
+        result = _vk.CreateImage(_device, in imageInfo, null, out _textureImage);
+        if (result != Result.Success)
+            throw new InvalidOperationException($"vkCreateImage (textures) failed: {result}");
+
+        _vk.GetImageMemoryRequirements(_device, _textureImage, out var requirements);
+        _textureMemory = Allocate(requirements, MemoryPropertyFlags.DeviceLocalBit);
+        _vk.BindImageMemory(_device, _textureImage, _textureMemory, 0);
+
+        _vk.ResetCommandBuffer(_commandBuffer, 0);
+        var beginInfo = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo };
+        _vk.BeginCommandBuffer(_commandBuffer, in beginInfo);
+
+        var toTransfer = new ImageMemoryBarrier
+        {
+            SType = StructureType.ImageMemoryBarrier,
+            OldLayout = ImageLayout.Undefined,
+            NewLayout = ImageLayout.TransferDstOptimal,
+            SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            Image = _textureImage,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, TextureLayerCount),
+            DstAccessMask = AccessFlags.TransferWriteBit,
+        };
+
+        _vk.CmdPipelineBarrier(_commandBuffer,
+            PipelineStageFlags.TopOfPipeBit, PipelineStageFlags.TransferBit, 0,
+            0, null, 0, null, 1, &toTransfer);
+
+        var regions = stackalloc BufferImageCopy[(int)TextureLayerCount];
+        for (var i = 0; i < TextureLayerCount; i++)
+        {
+            regions[i] = new BufferImageCopy
+            {
+                BufferOffset = (ulong)(i * layerBytes),
+                BufferRowLength = 0,
+                BufferImageHeight = 0,
+                ImageSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, (uint)i, 1),
+                ImageOffset = new Offset3D(0, 0, 0),
+                ImageExtent = new Extent3D(TextureSize, TextureSize, 1),
+            };
+        }
+
+        _vk.CmdCopyBufferToImage(_commandBuffer, staging, _textureImage,
+            ImageLayout.TransferDstOptimal, TextureLayerCount, regions);
+
+        var toShaderRead = new ImageMemoryBarrier
+        {
+            SType = StructureType.ImageMemoryBarrier,
+            OldLayout = ImageLayout.TransferDstOptimal,
+            NewLayout = ImageLayout.ShaderReadOnlyOptimal,
+            SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            Image = _textureImage,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, TextureLayerCount),
+            SrcAccessMask = AccessFlags.TransferWriteBit,
+            DstAccessMask = AccessFlags.ShaderReadBit,
+        };
+
+        _vk.CmdPipelineBarrier(_commandBuffer,
+            PipelineStageFlags.TransferBit, PipelineStageFlags.FragmentShaderBit, 0,
+            0, null, 0, null, 1, &toShaderRead);
+
+        _vk.EndCommandBuffer(_commandBuffer);
+
+        var command = _commandBuffer;
+        var submitInfo = new SubmitInfo
+        {
+            SType = StructureType.SubmitInfo,
+            CommandBufferCount = 1,
+            PCommandBuffers = &command,
+        };
+
+        result = _vk.QueueSubmit(_queue, 1, in submitInfo, default);
+        if (result != Result.Success)
+            throw new InvalidOperationException($"vkQueueSubmit (textures) failed: {result}");
+        _vk.QueueWaitIdle(_queue);
+
+        _vk.DestroyBuffer(_device, staging, null);
+        _vk.FreeMemory(_device, stagingMemory, null);
+
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = _textureImage,
+            ViewType = ImageViewType.Type2DArray,
+            Format = Format.R8G8B8A8Unorm,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, TextureLayerCount),
+        };
+
+        result = _vk.CreateImageView(_device, in viewInfo, null, out _textureView);
+        if (result != Result.Success)
+            throw new InvalidOperationException($"vkCreateImageView (textures) failed: {result}");
+
+        var samplerInfo = new SamplerCreateInfo
+        {
+            SType = StructureType.SamplerCreateInfo,
+            MagFilter = Filter.Linear,
+            MinFilter = Filter.Linear,
+            MipmapMode = SamplerMipmapMode.Linear,
+            AddressModeU = SamplerAddressMode.Repeat,
+            AddressModeV = SamplerAddressMode.Repeat,
+            AddressModeW = SamplerAddressMode.Repeat,
+            AnisotropyEnable = false,
+            MaxAnisotropy = 1f,
+            CompareEnable = false,
+            CompareOp = CompareOp.Always,
+            MinLod = 0f,
+            MaxLod = 0f,
+            BorderColor = BorderColor.FloatTransparentBlack,
+            UnnormalizedCoordinates = false,
+        };
+
+        result = _vk.CreateSampler(_device, in samplerInfo, null, out _textureSampler);
+        if (result != Result.Success)
+            throw new InvalidOperationException($"vkCreateSampler failed: {result}");
+    }
+
+    private static byte[] LoadTextureLayer(string resourceName)
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+                           ?? throw new InvalidOperationException($"Embedded texture '{resourceName}' not found.");
+        using var source = SKBitmap.Decode(stream)
+                          ?? throw new InvalidOperationException($"Failed to decode '{resourceName}'.");
+
+        var info = new SKImageInfo((int)TextureSize, (int)TextureSize, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        using var resized = new SKBitmap(info);
+        using (var canvas = new SKCanvas(resized))
+        {
+            canvas.Clear(SKColors.White);
+            var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
+            canvas.DrawBitmap(source, new SKRect(0, 0, TextureSize, TextureSize), sampling);
+        }
+
+        var bytes = new byte[(int)(TextureSize * TextureSize * 4)];
+        Marshal.Copy(resized.GetPixels(), bytes, 0, bytes.Length);
+        return bytes;
+    }
+
     private void CreateDescriptorResources()
     {
-        var binding = new DescriptorSetLayoutBinding
+        var bindings = stackalloc DescriptorSetLayoutBinding[3];
+        bindings[0] = new DescriptorSetLayoutBinding
         {
             Binding = 0,
             DescriptorType = DescriptorType.UniformBuffer,
             DescriptorCount = 1,
             StageFlags = ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit,
         };
+        bindings[1] = new DescriptorSetLayoutBinding
+        {
+            Binding = 1,
+            DescriptorType = DescriptorType.SampledImage,
+            DescriptorCount = 1,
+            StageFlags = ShaderStageFlags.FragmentBit,
+        };
+        bindings[2] = new DescriptorSetLayoutBinding
+        {
+            Binding = 2,
+            DescriptorType = DescriptorType.Sampler,
+            DescriptorCount = 1,
+            StageFlags = ShaderStageFlags.FragmentBit,
+        };
 
         var layoutInfo = new DescriptorSetLayoutCreateInfo
         {
             SType = StructureType.DescriptorSetLayoutCreateInfo,
-            BindingCount = 1,
-            PBindings = &binding,
+            BindingCount = 3,
+            PBindings = bindings,
         };
 
         var result = _vk.CreateDescriptorSetLayout(_device, in layoutInfo, null, out _descriptorSetLayout);
         if (result != Result.Success)
             throw new InvalidOperationException($"vkCreateDescriptorSetLayout failed: {result}");
 
-        var poolSize = new DescriptorPoolSize
-        {
-            Type = DescriptorType.UniformBuffer,
-            DescriptorCount = 1,
-        };
+        var poolSizes = stackalloc DescriptorPoolSize[3];
+        poolSizes[0] = new DescriptorPoolSize { Type = DescriptorType.UniformBuffer, DescriptorCount = 1 };
+        poolSizes[1] = new DescriptorPoolSize { Type = DescriptorType.SampledImage, DescriptorCount = 1 };
+        poolSizes[2] = new DescriptorPoolSize { Type = DescriptorType.Sampler, DescriptorCount = 1 };
 
         var poolInfo = new DescriptorPoolCreateInfo
         {
             SType = StructureType.DescriptorPoolCreateInfo,
-            PoolSizeCount = 1,
-            PPoolSizes = &poolSize,
+            PoolSizeCount = 3,
+            PPoolSizes = poolSizes,
             MaxSets = 1,
         };
 
@@ -522,7 +734,22 @@ public sealed unsafe class VulkanRenderer : IDisposable
             Range = UniformSize,
         };
 
-        var write = new WriteDescriptorSet
+        var imageInfo = new DescriptorImageInfo
+        {
+            Sampler = default,
+            ImageView = _textureView,
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+        };
+
+        var samplerInfo = new DescriptorImageInfo
+        {
+            Sampler = _textureSampler,
+            ImageView = default,
+            ImageLayout = ImageLayout.Undefined,
+        };
+
+        var writes = stackalloc WriteDescriptorSet[3];
+        writes[0] = new WriteDescriptorSet
         {
             SType = StructureType.WriteDescriptorSet,
             DstSet = _descriptorSet,
@@ -531,8 +758,26 @@ public sealed unsafe class VulkanRenderer : IDisposable
             DescriptorType = DescriptorType.UniformBuffer,
             PBufferInfo = &bufferInfo,
         };
+        writes[1] = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = _descriptorSet,
+            DstBinding = 1,
+            DescriptorCount = 1,
+            DescriptorType = DescriptorType.SampledImage,
+            PImageInfo = &imageInfo,
+        };
+        writes[2] = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = _descriptorSet,
+            DstBinding = 2,
+            DescriptorCount = 1,
+            DescriptorType = DescriptorType.Sampler,
+            PImageInfo = &samplerInfo,
+        };
 
-        _vk.UpdateDescriptorSets(_device, 1, &write, 0, null);
+        _vk.UpdateDescriptorSets(_device, 3, writes, 0, null);
     }
 
     private void CreatePipeline()
@@ -1017,6 +1262,11 @@ public sealed unsafe class VulkanRenderer : IDisposable
 
         _vk.DestroyBuffer(_device, _readbackBuffer, null);
         _vk.FreeMemory(_device, _readbackMemory, null);
+
+        _vk.DestroySampler(_device, _textureSampler, null);
+        _vk.DestroyImageView(_device, _textureView, null);
+        _vk.DestroyImage(_device, _textureImage, null);
+        _vk.FreeMemory(_device, _textureMemory, null);
 
         _vk.DestroyFramebuffer(_device, _framebuffer, null);
         _vk.DestroyRenderPass(_device, _renderPass, null);
