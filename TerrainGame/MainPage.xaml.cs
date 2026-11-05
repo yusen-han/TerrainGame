@@ -33,6 +33,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     private double _fps;
     private float _aspect = 16f / 9f;
     private bool _flipY;
+    private string? _errorText;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -70,7 +71,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         }
 
         GameView.Scene = this;
-        GameView.RenderError += (_, message) => StatusLabel.Text = message;
+        GameView.RenderError += (_, message) => _errorText = message;
 
         _lastFrame = _clock.Elapsed;
         _fpsWindowStart = _lastFrame;
@@ -89,6 +90,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         _terrain.OnTargetCreated(target);
         _aspect = target.AspectRatio;
         _flipY = target.FlipY;
+        _errorText = null;
         StatusLabel.Text = $"Vulkan target {target.Extent.Width}x{target.Extent.Height}";
     }
 
@@ -157,7 +159,8 @@ public partial class MainPage : ContentPage, IVulkanScene
                 StatusLabel.Text =
                     $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
                     $"modified {_streamer.World.ModifiedChunkCount}  " +
-                    $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}";
+                    $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}" +
+                    (_errorText is null ? string.Empty : $"  ERR: {_errorText}");
             }
         }
         catch (Exception ex)

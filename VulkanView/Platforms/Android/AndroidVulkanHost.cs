@@ -30,6 +30,11 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     private IntPtr _nativeWindow;
     private bool _disposed;
 
+    private static void Log(string message)
+    {
+        try { Android.Util.Log.Info("TerrainGame.Vulkan", message); } catch { }
+    }
+
     static AndroidVulkanHost()
     {
         try
@@ -53,23 +58,22 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         if (ReferenceEquals(_scene, scene))
             return;
 
-        if (_context is not null)
-        {
-            try { _scene?.OnTargetDestroyed(); } catch { /* ignore */ }
-            DestroyTarget();
-            DestroyContext();
-        }
-
+        _scene?.OnTargetDestroyed();
         _scene = scene;
+
+        if (_context is not null && _scene is not null)
+            _scene.OnTargetCreated(CreateTargetInfo());
     }
 
     public void SurfaceCreated(ISurfaceHolder holder)
     {
+        Log("SurfaceCreated");
         try
         {
             if (_nativeWindow == IntPtr.Zero)
                 _nativeWindow = ANativeWindowFromSurface(JNIEnv.Handle, holder.Surface!.Handle);
 
+            Log($"nativeWindow=0x{_nativeWindow.ToInt64():X}");
             if (_nativeWindow == IntPtr.Zero)
             {
                 _handler.ReportError("ANativeWindow_fromSurface returned null.");
@@ -80,6 +84,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
+            Log("RequestFrame failed: " + ex);
             _handler.ReportError(ex.Message);
         }
     }
@@ -93,6 +98,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
+            Log("RequestFrame failed: " + ex);
             _handler.ReportError(ex.Message);
         }
     }
@@ -111,8 +117,16 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     private void EnsureInitialized()
     {
-        if (_context is not null || _nativeWindow == IntPtr.Zero || _scene is null)
+        if (_context is not null)
             return;
+
+        if (_nativeWindow == IntPtr.Zero)
+        {
+            Log("EnsureInitialized: native window not ready");
+            return;
+        }
+
+        Log("EnsureInitialized: creating context");
 
         var vkApi = Silk.NET.Vulkan.Vk.GetApi();
         _context = new VulkanContext(
@@ -148,7 +162,8 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         _swapchainApi = swapchainApi;
 
         CreateSwapchain();
-        _scene.OnTargetCreated(CreateTargetInfo());
+        Log($"swapchain {_extent.Width}x{_extent.Height} format={_format}");
+        _scene?.OnTargetCreated(CreateTargetInfo());
     }
 
     private void CreateSwapchain()
@@ -238,19 +253,15 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     public void RequestFrame()
     {
-        if (_disposed || _scene is null)
+        if (_disposed)
             return;
 
         try
         {
             if (_context is null)
-            {
                 EnsureInitialized();
-                if (_context is null)
-                    return;
-            }
 
-            if (_swapchain.Handle == 0)
+            if (_context is null || _scene is null || _swapchain.Handle == 0)
                 return;
 
             var context = _context;
@@ -301,6 +312,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
+            Log("RequestFrame failed: " + ex);
             _handler.ReportError(ex.Message);
         }
     }
