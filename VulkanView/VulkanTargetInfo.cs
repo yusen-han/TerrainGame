@@ -18,5 +18,8 @@ public sealed class VulkanTargetInfo
 
     public required IReadOnlyList<ImageView> ImageViews { get; init; }
 
+    /// <summary>True when the colour image is stored top-down (D3D11 interop).</summary>
+    public bool FlipY { get; init; }
+
     public float AspectRatio => Extent.Height == 0 ? 1f : Extent.Width / (float)Extent.Height;
 }

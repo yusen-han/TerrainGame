@@ -97,7 +97,7 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 
 ### Rendering backends
 Frames are no longer read back to the CPU. `VulkanView` owns the Vulkan instance/device and the presentation target:
-- **Windows**: `SwapChainPanel` + DXGI `CreateSwapChainForComposition`; Vulkan renders into a D3D11 texture shared through an NT handle (`VK_KHR_external_memory_win32`), then one `CopyResource` + `Present`.
+- **Windows**: `SwapChainPanel` + DXGI `CreateSwapChainForComposition`; Vulkan renders into a D3D11 texture shared through an NT handle (`VK_KHR_external_memory_win32`), then one `CopyResource` + `Present`. The target reports `FlipY` because D3D11 stores the image top-down, so the app mirrors the projection's Y axis on Windows only.
 - **Android**: `SurfaceView` + `VK_KHR_android_surface` with a real `VkSwapchainKHR`; rendering goes straight into acquired swapchain images and `vkQueuePresentKHR` presents them.
 - **Apple/MoltenVK**: deferred. The control is structured so an `VK_EXT_metal_surface` target can be added with a bundled MoltenVK loader.
 

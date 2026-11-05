@@ -32,6 +32,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     private TimeSpan _fpsWindowStart;
     private double _fps;
     private float _aspect = 16f / 9f;
+    private bool _flipY;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -87,6 +88,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         _terrain = new TerrainRenderer(target.Context);
         _terrain.OnTargetCreated(target);
         _aspect = target.AspectRatio;
+        _flipY = target.FlipY;
         StatusLabel.Text = $"Vulkan target {target.Extent.Width}x{target.Extent.Height}";
     }
 
@@ -94,6 +96,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     {
         _terrain?.OnTargetResized(target);
         _aspect = target.AspectRatio;
+        _flipY = target.FlipY;
     }
 
     public void OnTargetDestroyed()
@@ -129,6 +132,10 @@ public partial class MainPage : ContentPage, IVulkanScene
                     _aspect,
                     0.5f,
                     500f);
+
+                // D3D11 interop stores the colour image top-down, so mirror the Y axis.
+                if (_flipY)
+                    projection.M22 = -projection.M22;
 
                 _terrain.SetCamera(view * projection, _camera.Position);
             }

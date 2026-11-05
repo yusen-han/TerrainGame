@@ -166,6 +166,7 @@ internal sealed unsafe class WindowsVulkanHost : IDisposable
         Extent = new Extent2D((uint)_width, (uint)_height),
         FinalLayout = ImageLayout.ColorAttachmentOptimal,
         ImageViews = new[] { _imageView },
+        FlipY = true,
     };
 
     private void CreateD3DDevice()
