@@ -2,4 +2,5 @@
   <Project Path="TerrainGame.csproj">
     <Deploy Solution="Debug|*" />
   </Project>
+  <Project Path="../VulkanView/VulkanView.csproj" />
 </Solution>

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
-using SkiaSharp.Views.Maui.Controls.Hosting;
+using Microsoft.Maui.Hosting;
+using VulkanView;
 
 namespace TerrainGame;
 
@@ -10,7 +11,10 @@ public static class MauiProgram
 		var builder = MauiApp.CreateBuilder();
 		builder
 			.UseMauiApp<App>()
-			.UseSkiaSharp()
+			.ConfigureMauiHandlers(handlers =>
+			{
+				handlers.AddHandler<VulkanView.VulkanView, VulkanViewHandler>();
+			})
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

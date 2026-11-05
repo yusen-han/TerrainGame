@@ -1,13 +1,13 @@
 # Development Plan
 
 ## Goal
-A cross-platform (Windows + Android), single-player terrain-discovery game built on .NET MAUI + Silk.NET.Vulkan. The player flies freely over streamed, procedurally generated 3D terrain and discovers it. Terrain is rendered off-screen, copied to the CPU and shown through MAUI. No game engine, no platform-specific code.
+A cross-platform (Windows + Android), single-player terrain-discovery game built on .NET MAUI + Silk.NET.Vulkan. The player flies freely over streamed, procedurally generated 3D terrain and discovers it. Terrain is rendered directly into a platform swapchain hosted by a reusable MAUI control (`VulkanView`); platform code lives inside that control. No game engine.
 
 ## Status
 | Area | State |
 |------|-------|
 | MAUI shell, window, life cycle | Done |
-| Off-screen Vulkan renderer (image → CPU pixels → `SKCanvasView`) | Done |
+| `VulkanView` MAUI control owning instance/device/surface/swapchain | Done |
 | HLSL shaders compiled to SPIR-V, embedded in the assembly | Done |
 | Custom 3D noise + Marching Cubes terrain | Done |
 | 3D pipeline: vertex buffers, depth buffer, uniform buffer, lighting, fog | Done |
@@ -15,7 +15,7 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | Hold-to-dig with volumetric caves (persistent voxel edits) | Done |
 | Streaming chunks around the player on background workers | Done |
 | Fly camera + pointer-look + on-screen movement buttons | Done |
-| SkiaSharp presentation (SKBitmap over the readback buffer, zero-copy) | Done |
+| Swapchain presentation: DXGI SwapChainPanel (Windows) / VkSwapchainKHR (Android) | Done |
 | Windows build & run | Verified |
 | Android build | Compiles; not yet run on a device |
 | UX polish (HUD, saving, scoring) | Not started |
@@ -23,8 +23,8 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 ## Architecture
 | Project path | Responsibility |
 |--------------|----------------|
-| `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, dig raycast, wrapping the readback buffer in an `SKBitmap` and invalidating the `SKCanvasView` |
-| `TerrainGame/Graphics/VulkanRenderer.cs` | Headless Vulkan: instance/device, color + depth targets, render pass, pipeline, chunk vertex buffers, uniform buffer, material texture array + sampler, readback, row flip |
+| `TerrainGame/MainPage.xaml(.cs)` | Game loop (30 fps dispatcher timer), input, HUD, dig raycast; implements `IVulkanScene` and forwards frames to `TerrainRenderer` |
+| `TerrainGame/Graphics/TerrainRenderer.cs` | Scene renderer: render pass, depth buffer, pipeline, chunk vertex buffers, uniform buffer, material texture array + sampler; records into the control's command buffer |
 | `TerrainGame/Graphics/CameraController.cs` | Free-fly camera (no gravity), yaw/pitch, view matrix |
 | `TerrainGame/Terrain/Noise2D.cs` | Seeded 2D Perlin noise (base height) |
 | `TerrainGame/Terrain/Noise3D.cs` | Seeded 3D Perlin noise (sparse cave carving) |
@@ -37,14 +37,17 @@ A cross-platform (Windows + Android), single-player terrain-discovery game built
 | `TerrainGame/Terrain/ChunkStreamer.cs` | Desired-chunk set around the camera, background generation via `Channel<long>`, rebuild requests after digging, releases chunks through `TerrainWorld` |
 | `TerrainGame/Shaders/terrain.hlsl` | Vertex + pixel shaders (HLSL 6.0 → SPIR-V): triplanar sampling from the material texture array, lighting, fog |
 | `TerrainGame/Resources/Textures/*.png` | Grass / sand / dirt / stone textures, embedded in the assembly and packed into a 2D array image (256×256 per layer) |
+| `VulkanView/VulkanView.cs` | MAUI control: `Scene` property, `RequestFrame()`, error event |
+| `VulkanView/VulkanContext.cs` | Instance/device/queue/command pool + memory helpers |
+| `VulkanView/Platforms/Windows/*` | `SwapChainPanel` + D3D11 shared-texture interop (imported into Vulkan, one GPU blit, DXGI present) |
+| `VulkanView/Platforms/Android/*` | `SurfaceView` + `VK_KHR_android_surface`, real `VkSwapchainKHR`, zero-copy present |
 
 ### Frame flow
 1. Update camera from input.
 2. Ask `ChunkStreamer` for chunks around the camera; upload finished meshes, destroy out-of-range ones.
 3. Build `view * projection`, write the scene uniform buffer.
-4. Record: render pass (clear + depth), bind pipeline, draw each chunk, barrier, copy color image to a host-visible buffer.
-5. Submit, wait idle, map the buffer, copy pixels, flip rows.
-6. `NotifyPixelsChanged()` on the `SKBitmap`, then `SKCanvasView.InvalidateSurface()`. The canvas draws the bitmap with aspect fill.
+4. The control has already acquired a target image and begun the command buffer. `TerrainRenderer.Render` records the render pass (clear + depth), binds the pipeline and draws each chunk, ending in the platform's final layout (`PresentSrcKHR` on Android, `ColorAttachmentOptimal` on Windows).
+5. The control ends the command buffer and submits; on Android it presents the swapchain image; on Windows it waits for the queue, copies the shared texture into the DXGI backbuffer and presents.
 
 ## Build & Run
 ```bash
@@ -82,17 +85,21 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 - **Texturing**: the four PNGs are decoded with SkiaSharp, resized to 256×256 and uploaded as one `R8G8B8A8_UNORM` 2D array image (layer order = Grass, Sand, Dirt, Stone). Descriptor set: binding 0 uniform buffer, binding 1 sampled image array, binding 2 repeating linear sampler. The pixel shader samples the layer selected by the vertex material with triplanar projection (`0.12` tiles per world unit), so cliffs and cave walls are textured without UVs.
 
 ## Known Issues / Limits
-- **Readback is the bottleneck**: every frame is rendered off-screen, copied to host memory and flipped on the CPU (~1000×600 at ~30 fps target). The next step would be uploading the pixels as a GPU texture instead of reading them back.
+- **Windows has one GPU blit**: Vulkan renders into a shared D3D11 texture and `CopyResource` pushes it into the SwapChainPanel's backbuffer. There is no CPU readback, but it is not strictly zero-copy. Android presents directly to swapchain images.
+- **Dependency on matching GPUs**: the D3D11 device and the Vulkan physical device must be on the same adapter for the shared-texture import. Multi-GPU laptops can pick different adapters.
 - **Modified chunks are memory-only**: digging survives streaming but not an app restart; there is no disk save yet. Modified chunk grids also stay in memory while exploring.
 - **No collision**: the camera can fly through terrain.
 - **Bounded world**: each chunk spans y ∈ [-16, 8]; digging outside that band has no visible effect.
 - **Textures are basic**: 256×256, no mipmaps, no normal/roughness maps, and the source images are not seamless so tiling is visible up close. Triplanar projection can look slightly soft on 45° slopes.
 - **No MSAA**: distant terrain shows some shimmering.
-- **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports a page size in physical pixels while WinUI scales the content, so the UI is drawn enlarged and clipped. Layout is anchored top-left so all controls remain reachable; the same layout is correct on other devices. Not addressed in game code (would require platform-specific fixes).
+- **Windows high-DPI quirk**: on the test machine (200 % scaling) MAUI reports layout in physical pixels. The Windows target therefore sizes the swapchain from `ActualWidth/Height` directly instead of multiplying by `CompositionScale` (which double-scaled it). On a correctly-scaled display the swapchain is rendered at logical resolution and stretched slightly.
 - Android is built but not yet exercised on hardware; Vulkan availability and driver behaviour still need testing.
 
-### Frame presentation
-Earlier builds assigned `Image.Source` (a new stream-backed source) every frame, which flashes on Android because the native drawable is torn down before the next bitmap is decoded. Frames now go to an `SKBitmap` that wraps the renderer's pinned BGRA buffer (installed once, zero-copy) and are painted by an `SKCanvasView`; no PNG encoding, no source churn.
+### Rendering backends
+Frames are no longer read back to the CPU. `VulkanView` owns the Vulkan instance/device and the presentation target:
+- **Windows**: `SwapChainPanel` + DXGI `CreateSwapChainForComposition`; Vulkan renders into a D3D11 texture shared through an NT handle (`VK_KHR_external_memory_win32`), then one `CopyResource` + `Present`.
+- **Android**: `SurfaceView` + `VK_KHR_android_surface` with a real `VkSwapchainKHR`; rendering goes straight into acquired swapchain images and `vkQueuePresentKHR` presents them.
+- **Apple/MoltenVK**: deferred. The control is structured so an `VK_EXT_metal_surface` target can be added with a bundled MoltenVK loader.
 
 ## Next Steps
 1. Upload the readback pixels as a GPU texture (or render into a surface) to remove the CPU round-trip.

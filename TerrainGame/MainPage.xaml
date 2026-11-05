@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:skia="clr-namespace:SkiaSharp.Views.Maui.Controls;assembly=SkiaSharp.Views.Maui.Controls"
+             xmlns:vv="clr-namespace:VulkanView;assembly=VulkanView"
              x:Class="TerrainGame.MainPage"
              Shell.NavBarIsVisible="False"
              BackgroundColor="Black">
 
     <Grid>
 
-        <skia:SKCanvasView x:Name="GameView"
-                           HorizontalOptions="Fill"
-                           VerticalOptions="Fill"
-                           PaintSurface="OnPaintSurface">
-            <skia:SKCanvasView.GestureRecognizers>
+        <vv:VulkanView x:Name="GameView"
+                       HorizontalOptions="Fill"
+                       VerticalOptions="Fill">
+            <vv:VulkanView.GestureRecognizers>
                 <PointerGestureRecognizer PointerPressed="OnPointerPressed"
                                           PointerMoved="OnPointerMoved"
                                           PointerReleased="OnPointerReleased" />
-            </skia:SKCanvasView.GestureRecognizers>
-        </skia:SKCanvasView>
+            </vv:VulkanView.GestureRecognizers>
+        </vv:VulkanView>
 
         <Label x:Name="StatusLabel"
                Text="Initializing Vulkan…"

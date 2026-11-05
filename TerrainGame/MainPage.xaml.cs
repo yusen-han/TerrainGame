@@ -2,19 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
-using SkiaSharp;
-using SkiaSharp.Views.Maui;
 using TerrainGame.Graphics;
 using TerrainGame.Terrain;
+using VulkanView;
 
 namespace TerrainGame;
 
-public partial class MainPage : ContentPage
+public partial class MainPage : ContentPage, IVulkanScene
 {
-    private const int FrameWidth = 1000;
-    private const int FrameHeight = 600;
     private const float LookSensitivity = 0.006f;
 
     private readonly CameraController _camera = new()
@@ -27,16 +23,15 @@ public partial class MainPage : ContentPage
     private readonly List<ChunkStreamer.CompletedChunk> _ready = new();
     private readonly List<long> _removals = new();
 
-    private VulkanRenderer? _renderer;
     private ChunkStreamer? _streamer;
-    private SKBitmap? _frameBitmap;
-    private GCHandle _pixelHandle;
+    private TerrainRenderer? _terrain;
     private IDispatcherTimer? _timer;
     private TimeSpan _lastFrame;
     private int _frameCount;
     private int _fpsFrames;
     private TimeSpan _fpsWindowStart;
     private double _fps;
+    private float _aspect = 16f / 9f;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -60,31 +55,21 @@ public partial class MainPage : ContentPage
 
     private void OnLoaded(object? sender, EventArgs e)
     {
-        if (_renderer is not null)
+        if (_streamer is not null)
             return;
 
         try
         {
-            _renderer = new VulkanRenderer(FrameWidth, FrameHeight);
             _streamer = new ChunkStreamer(new TerrainWorld(seed: 98876), radius: 4);
-
-            // The renderer writes into its own BGRA buffer; wrap it instead of copying.
-            _pixelHandle = GCHandle.Alloc(_renderer.Pixels, GCHandleType.Pinned);
-            _frameBitmap = new SKBitmap();
-            var info = new SKImageInfo(
-                _renderer.Width,
-                _renderer.Height,
-                SKColorType.Bgra8888,
-                SKAlphaType.Opaque);
-
-            if (!_frameBitmap.InstallPixels(info, _pixelHandle.AddrOfPinnedObject(), info.RowBytes))
-                throw new InvalidOperationException("Failed to install the frame pixels into an SKBitmap.");
         }
         catch (Exception ex)
         {
             StatusLabel.Text = $"Initialization failed:{Environment.NewLine}{ex.Message}";
             return;
         }
+
+        GameView.Scene = this;
+        GameView.RenderError += (_, message) => StatusLabel.Text = message;
 
         _lastFrame = _clock.Elapsed;
         _fpsWindowStart = _lastFrame;
@@ -94,9 +79,36 @@ public partial class MainPage : ContentPage
         _timer.Start();
     }
 
+    // ---- IVulkanScene -------------------------------------------------
+
+    public void OnTargetCreated(VulkanTargetInfo target)
+    {
+        _terrain?.Dispose();
+        _terrain = new TerrainRenderer(target.Context);
+        _terrain.OnTargetCreated(target);
+        _aspect = target.AspectRatio;
+        StatusLabel.Text = $"Vulkan target {target.Extent.Width}x{target.Extent.Height}";
+    }
+
+    public void OnTargetResized(VulkanTargetInfo target)
+    {
+        _terrain?.OnTargetResized(target);
+        _aspect = target.AspectRatio;
+    }
+
+    public void OnTargetDestroyed()
+    {
+        _terrain?.Dispose();
+        _terrain = null;
+    }
+
+    public void Render(VulkanFrameContext frame) => _terrain?.Render(frame);
+
+    // ---- frame loop ---------------------------------------------------
+
     private void RenderFrame()
     {
-        if (_renderer is null || _streamer is null)
+        if (_streamer is null)
             return;
 
         try
@@ -109,18 +121,19 @@ public partial class MainPage : ContentPage
             UpdateDigging(now);
             UpdateTerrain();
 
-            var view = _camera.GetViewMatrix();
-            var projection = Matrix4x4.CreatePerspectiveFieldOfView(
-                MathF.PI / 3f,
-                _renderer.Width / (float)_renderer.Height,
-                0.5f,
-                500f);
+            if (_terrain is not null)
+            {
+                var view = _camera.GetViewMatrix();
+                var projection = Matrix4x4.CreatePerspectiveFieldOfView(
+                    MathF.PI / 3f,
+                    _aspect,
+                    0.5f,
+                    500f);
 
-            _renderer.SetCamera(view * projection, _camera.Position);
+                _terrain.SetCamera(view * projection, _camera.Position);
+            }
 
-            _renderer.Render();
-            _frameBitmap?.NotifyPixelsChanged();
-            GameView.InvalidateSurface();
+            GameView.RequestFrame();
 
             _frameCount++;
             _fpsFrames++;
@@ -135,7 +148,8 @@ public partial class MainPage : ContentPage
             if (_frameCount % 4 == 0)
             {
                 StatusLabel.Text =
-                    $"chunks {_renderer.ChunkCount}  fps {_fps:F0}  modified {_streamer.World.ModifiedChunkCount}  " +
+                    $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
+                    $"modified {_streamer.World.ModifiedChunkCount}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}";
             }
         }
@@ -226,7 +240,7 @@ public partial class MainPage : ContentPage
 
     private void UpdateTerrain()
     {
-        if (_streamer is null || _renderer is null)
+        if (_streamer is null)
             return;
 
         _streamer.Update(_camera.Position);
@@ -234,13 +248,15 @@ public partial class MainPage : ContentPage
         _ready.Clear();
         _streamer.DrainReady(_ready);
         foreach (var chunk in _ready)
-            _renderer.SetChunk(chunk.Key, chunk.Vertices);
+            _terrain?.SetChunk(chunk.Key, chunk.Vertices);
 
         _removals.Clear();
         _streamer.DrainRemovals(_removals);
         foreach (var key in _removals)
-            _renderer.RemoveChunk(key);
+            _terrain?.RemoveChunk(key);
     }
+
+    // ---- input --------------------------------------------------------
 
     private void OnMovePressed(object? sender, EventArgs e) => SetMovement(sender, true);
 
@@ -295,50 +311,13 @@ public partial class MainPage : ContentPage
         _lastPointer = null;
     }
 
-    private void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
-    {
-        var canvas = e.Surface.Canvas;
-        canvas.Clear(SKColors.Black);
-
-        if (_frameBitmap is null || _frameBitmap.Width == 0)
-            return;
-
-        var info = e.Info;
-        var scale = MathF.Max(info.Width / (float)_frameBitmap.Width, info.Height / (float)_frameBitmap.Height);
-        var width = _frameBitmap.Width * scale;
-        var height = _frameBitmap.Height * scale;
-        var left = (info.Width - width) / 2f;
-        var top = (info.Height - height) / 2f;
-
-        var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
-        canvas.DrawBitmap(_frameBitmap, new SKRect(left, top, left + width, top + height), sampling);
-
-        // Crosshair: the dig raycast goes through the centre of the frame.
-        var crosshairColor = _pointerDown ? new SKColor(255, 176, 64) : SKColors.White.WithAlpha(200);
-        using var crosshair = new SKPaint
-        {
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f,
-            IsAntialias = true,
-            Color = crosshairColor,
-        };
-        canvas.DrawCircle(info.Width / 2f, info.Height / 2f, 7f, crosshair);
-    }
-
     private void OnUnloaded(object? sender, EventArgs e)
     {
         _timer?.Stop();
         _timer = null;
-
-        // The bitmap wraps the renderer's pinned pixel buffer, so release it first.
-        _frameBitmap?.Dispose();
-        _frameBitmap = null;
-        if (_pixelHandle.IsAllocated)
-            _pixelHandle.Free();
-
+        _terrain?.Dispose();
+        _terrain = null;
         _streamer?.Dispose();
         _streamer = null;
-        _renderer?.Dispose();
-        _renderer = null;
     }
 }
