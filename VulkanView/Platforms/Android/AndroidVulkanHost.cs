@@ -30,6 +30,18 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     private IntPtr _nativeWindow;
     private bool _disposed;
 
+    static AndroidVulkanHost()
+    {
+        try
+        {
+            Java.Lang.JavaSystem.LoadLibrary("android");
+        }
+        catch
+        {
+            // libandroid is usually resolvable by name on the NDK layout.
+        }
+    }
+
     public AndroidVulkanHost(SurfaceView view, VulkanViewHandler handler)
     {
         _view = view;
@@ -58,8 +70,13 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
             if (_nativeWindow == IntPtr.Zero)
                 _nativeWindow = ANativeWindowFromSurface(JNIEnv.Handle, holder.Surface!.Handle);
 
-            if (_nativeWindow != IntPtr.Zero)
-                EnsureInitialized();
+            if (_nativeWindow == IntPtr.Zero)
+            {
+                _handler.ReportError("ANativeWindow_fromSurface returned null.");
+                return;
+            }
+
+            EnsureInitialized();
         }
         catch (Exception ex)
         {
@@ -221,11 +238,21 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     public void RequestFrame()
     {
-        if (_disposed || _scene is null || _context is null || _swapchain.Handle == 0)
+        if (_disposed || _scene is null)
             return;
 
         try
         {
+            if (_context is null)
+            {
+                EnsureInitialized();
+                if (_context is null)
+                    return;
+            }
+
+            if (_swapchain.Handle == 0)
+                return;
+
             var context = _context;
             var vk = context.Vk;
 
@@ -349,9 +376,9 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         base.Dispose();
     }
 
-    [DllImport("android", EntryPoint = "ANativeWindow_fromSurface")]
+    [DllImport("libandroid.so", EntryPoint = "ANativeWindow_fromSurface")]
     private static extern IntPtr ANativeWindowFromSurface(IntPtr env, IntPtr surface);
 
-    [DllImport("android", EntryPoint = "ANativeWindow_release")]
+    [DllImport("libandroid.so", EntryPoint = "ANativeWindow_release")]
     private static extern void ANativeWindowRelease(IntPtr window);
 }
