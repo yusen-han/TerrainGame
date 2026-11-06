@@ -71,7 +71,7 @@ dxc -spirv -T ps_6_0 -E PSMain -Zpr -Fo terrain.frag.spv terrain.hlsl
 The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 
 ## Controls
-- Drag on the image: look around (yaw/pitch).
+- Drag on the image with mouse or touch: look around (yaw/pitch). Pointer deltas are used where available; a pan gesture covers Android touch.
 - `Fwd` / `Back`: move along the view direction; `Left` / `Right`: strafe; `Up` / `Down`: rise/sink. Gravity is not simulated.
 - **Dig**: press and hold the left mouse button / touch for more than one second. The crosshair turns orange while held and a brush is carved at the crosshair every 350 ms. Works on the surface and underground (caves).
 - Start position: `(0, 16, 0)` looking slightly down at the terrain.
@@ -97,7 +97,7 @@ The `.spv` files are embedded as `TerrainGame.Shaders.<name>.spv`.
 
 ### Rendering backends
 Frames are no longer read back to the CPU. `VulkanView` owns the Vulkan instance/device and the presentation target:
-- **Windows**: `SwapChainPanel` + DXGI `CreateSwapChainForComposition`; Vulkan renders into a D3D11 texture shared through an NT handle (`VK_KHR_external_memory_win32`), then one `CopyResource` + `Present`. The target reports `FlipY` because D3D11 stores the image top-down, so the app mirrors the projection's Y axis on Windows only.
+- **Windows**: `SwapChainPanel` + DXGI `CreateSwapChainForComposition`; Vulkan renders into a D3D11 texture shared through an NT handle (`VK_KHR_external_memory_win32`), then one `CopyResource` + `Present`. The targets report `FlipY` (D3D11 stores the image top-down, and Android's swapchain presents Vulkan's Y-down NDC directly), so the app mirrors the projection's Y axis on both platforms.
 - **Android**: `SurfaceView` + `VK_KHR_android_surface` with a real `VkSwapchainKHR`; rendering goes straight into acquired swapchain images and `vkQueuePresentKHR` presents them.
 - **Apple/MoltenVK**: deferred. The control is structured so an `VK_EXT_metal_surface` target can be added with a bundled MoltenVK loader.
 

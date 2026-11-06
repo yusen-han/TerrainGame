@@ -268,6 +268,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         Extent = _extent,
         FinalLayout = ImageLayout.PresentSrcKhr,
         ImageViews = _imageViews,
+        FlipY = true,
     };
 
     public void EnsureTarget()

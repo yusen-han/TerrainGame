@@ -44,6 +44,9 @@ public partial class MainPage : ContentPage, IVulkanScene
     private Point? _lastPointer;
     private TimeSpan _pressStart;
     private TimeSpan _lastDig;
+    private TimeSpan _lastPointerMove;
+    private double _panLastX;
+    private double _panLastY;
 
     private bool _moveForward;
     private bool _moveBack;
@@ -339,6 +342,37 @@ public partial class MainPage : ContentPage, IVulkanScene
         }
 
         _lastPointer = position;
+        _lastPointerMove = _clock.Elapsed;
+    }
+
+    private void OnPanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        var now = _clock.Elapsed;
+
+        // Let the pointer path own mouse/look drags; pan handles touch on Android.
+        if (_pointerDown && now - _lastPointerMove < TimeSpan.FromMilliseconds(150))
+            return;
+
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _panLastX = 0;
+                _panLastY = 0;
+                break;
+
+            case GestureStatus.Running:
+                var dx = e.TotalX - _panLastX;
+                var dy = e.TotalY - _panLastY;
+                _panLastX = e.TotalX;
+                _panLastY = e.TotalY;
+                _camera.Rotate((float)dx * LookSensitivity, -(float)dy * LookSensitivity);
+                break;
+
+            default:
+                _panLastX = 0;
+                _panLastY = 0;
+                break;
+        }
     }
 
     private void OnPointerReleased(object? sender, PointerEventArgs e)

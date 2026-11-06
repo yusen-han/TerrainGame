@@ -15,6 +15,7 @@
                 <PointerGestureRecognizer PointerPressed="OnPointerPressed"
                                           PointerMoved="OnPointerMoved"
                                           PointerReleased="OnPointerReleased" />
+                <PanGestureRecognizer PanUpdated="OnPanUpdated" />
             </vv:VulkanView.GestureRecognizers>
         </vv:VulkanView>
 
