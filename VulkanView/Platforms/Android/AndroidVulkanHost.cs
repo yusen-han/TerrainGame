@@ -30,9 +30,10 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     private IntPtr _nativeWindow;
     private bool _disposed;
 
-    private static void Log(string message)
+    private void State(string message)
     {
         try { Android.Util.Log.Info("TerrainGame.Vulkan", message); } catch { }
+        _handler.ReportDiagnostics(message);
     }
 
     static AndroidVulkanHost()
@@ -51,6 +52,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     {
         _view = view;
         _handler = handler;
+        State("host created");
     }
 
     public void SetScene(IVulkanScene? scene)
@@ -60,6 +62,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
         _scene?.OnTargetDestroyed();
         _scene = scene;
+        State($"scene set: {(_scene is null ? "null" : "ok")}");
 
         if (_context is not null && _scene is not null)
             _scene.OnTargetCreated(CreateTargetInfo());
@@ -67,13 +70,13 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     public void SurfaceCreated(ISurfaceHolder holder)
     {
-        Log("SurfaceCreated");
+        State("SurfaceCreated");
         try
         {
             if (_nativeWindow == IntPtr.Zero)
                 _nativeWindow = ANativeWindowFromSurface(JNIEnv.Handle, holder.Surface!.Handle);
 
-            Log($"nativeWindow=0x{_nativeWindow.ToInt64():X}");
+            State($"nativeWindow=0x{_nativeWindow.ToInt64():X}");
             if (_nativeWindow == IntPtr.Zero)
             {
                 _handler.ReportError("ANativeWindow_fromSurface returned null.");
@@ -84,7 +87,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
-            Log("RequestFrame failed: " + ex);
+            State("ERR " + ex.Message);
             _handler.ReportError(ex.Message);
         }
     }
@@ -98,7 +101,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
-            Log("RequestFrame failed: " + ex);
+            State("ERR " + ex.Message);
             _handler.ReportError(ex.Message);
         }
     }
@@ -122,11 +125,11 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
         if (_nativeWindow == IntPtr.Zero)
         {
-            Log("EnsureInitialized: native window not ready");
+            State("window not ready");
             return;
         }
 
-        Log("EnsureInitialized: creating context");
+        State("creating context");
 
         var vkApi = Silk.NET.Vulkan.Vk.GetApi();
         _context = new VulkanContext(
@@ -162,7 +165,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         _swapchainApi = swapchainApi;
 
         CreateSwapchain();
-        Log($"swapchain {_extent.Width}x{_extent.Height} format={_format}");
+        State($"swapchain {_extent.Width}x{_extent.Height} {_format}");
         _scene?.OnTargetCreated(CreateTargetInfo());
     }
 
@@ -312,7 +315,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         }
         catch (Exception ex)
         {
-            Log("RequestFrame failed: " + ex);
+            State("ERR " + ex.Message);
             _handler.ReportError(ex.Message);
         }
     }

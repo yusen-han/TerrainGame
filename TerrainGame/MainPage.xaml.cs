@@ -34,6 +34,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     private float _aspect = 16f / 9f;
     private bool _flipY;
     private string? _errorText;
+    private string? _diagnostics;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -71,7 +72,9 @@ public partial class MainPage : ContentPage, IVulkanScene
         }
 
         GameView.Scene = this;
+        _diagnostics = GameView.Handler is VulkanViewHandler ? "handler ok" : "handler MISSING";
         GameView.RenderError += (_, message) => _errorText = message;
+        GameView.DiagnosticsChanged += (_, _) => _diagnostics = GameView.Diagnostics;
 
         _lastFrame = _clock.Elapsed;
         _fpsWindowStart = _lastFrame;
@@ -159,7 +162,8 @@ public partial class MainPage : ContentPage, IVulkanScene
                 StatusLabel.Text =
                     $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
                     $"modified {_streamer.World.ModifiedChunkCount}  " +
-                    $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}" +
+                    $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}  " +
+                    $"diag: {_diagnostics ?? "none"}" +
                     (_errorText is null ? string.Empty : $"  ERR: {_errorText}");
             }
         }

@@ -45,4 +45,10 @@ public class VulkanViewHandler : ViewHandler<global::VulkanView.VulkanView, Swap
     public void RequestFrame() => _host?.RequestFrame();
 
     internal void ReportError(string message) => VirtualView?.ReportError(message);
+
+    internal void ReportDiagnostics(string message)
+    {
+        if (VirtualView is not null)
+            VirtualView.Diagnostics = message;
+    }
 }

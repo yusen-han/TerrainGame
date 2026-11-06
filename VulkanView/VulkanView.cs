@@ -21,6 +21,21 @@ public class VulkanView : View
 
     public event EventHandler<string>? RenderError;
 
+    public event EventHandler? DiagnosticsChanged;
+
+    private string? _diagnostics;
+
+    /// <summary>Last platform/host state, surfaced in the app HUD for debugging.</summary>
+    public string? Diagnostics
+    {
+        get => _diagnostics;
+        internal set
+        {
+            _diagnostics = value;
+            DiagnosticsChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     /// <summary>Renders and presents one frame. Call from the game loop.</summary>
     public void RequestFrame()
     {
