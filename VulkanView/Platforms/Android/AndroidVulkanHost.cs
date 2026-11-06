@@ -30,6 +30,8 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     private IntPtr _nativeWindow;
     private bool _disposed;
     private bool _targetNotified;
+    private int _frames;
+    private int _recreates;
 
     private void State(string message)
     {
@@ -303,7 +305,10 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
             }
 
             if (acquire is not (Result.Success or Result.SuboptimalKhr))
+            {
+                State($"acquire {acquire}");
                 return;
+            }
 
             var command = context.CommandBuffer;
             vk.ResetCommandBuffer(command, 0);
@@ -334,6 +339,10 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
                 RecreateSwapchain();
 
             vk.QueueWaitIdle(context.Queue);
+
+            _frames++;
+            if (_frames == 1 || _frames == 10 || _frames % 300 == 0)
+                State($"presented {_frames} frames, recreates {_recreates}");
         }
         catch (Exception ex)
         {
@@ -347,6 +356,8 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         if (_context is null)
             return;
 
+        _recreates++;
+        State($"recreate swapchain #{_recreates}");
         _scene?.OnTargetDestroyed();
         DestroySwapchain();
         CreateSwapchain();

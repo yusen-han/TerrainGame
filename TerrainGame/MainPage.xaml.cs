@@ -36,6 +36,8 @@ public partial class MainPage : ContentPage, IVulkanScene
     private string? _errorText;
     private string? _diagnostics;
     private string? _pageDiag;
+    private int _renderCalls;
+    private int _queuedChunks;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -112,7 +114,11 @@ public partial class MainPage : ContentPage, IVulkanScene
         _terrain = null;
     }
 
-    public void Render(VulkanFrameContext frame) => _terrain?.Render(frame);
+    public void Render(VulkanFrameContext frame)
+    {
+        _renderCalls++;
+        _terrain?.Render(frame);
+    }
 
     // ---- frame loop ---------------------------------------------------
 
@@ -165,7 +171,8 @@ public partial class MainPage : ContentPage, IVulkanScene
                     $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
                     $"modified {_streamer.World.ModifiedChunkCount}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}  " +
-                    $"page: {_pageDiag ?? "?"}  host: {_diagnostics ?? "none"}" +
+                    $"page: {_pageDiag ?? "?"} renders {_renderCalls} queued {_queuedChunks}  " +
+                    $"host: {_diagnostics ?? "none"}" +
                     (_errorText is null ? string.Empty : $"  ERR: {_errorText}");
             }
         }
@@ -264,7 +271,10 @@ public partial class MainPage : ContentPage, IVulkanScene
         _ready.Clear();
         _streamer.DrainReady(_ready);
         foreach (var chunk in _ready)
+        {
             _terrain?.SetChunk(chunk.Key, chunk.Vertices);
+            _queuedChunks++;
+        }
 
         _removals.Clear();
         _streamer.DrainRemovals(_removals);
