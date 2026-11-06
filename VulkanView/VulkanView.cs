@@ -43,5 +43,12 @@ public class VulkanView : View
             handler.RequestFrame();
     }
 
+    /// <summary>Re-delivers OnTargetCreated if a target exists but the scene lost it.</summary>
+    public void EnsureTarget()
+    {
+        if (Handler is VulkanViewHandler handler)
+            handler.EnsureTarget();
+    }
+
     internal void ReportError(string message) => RenderError?.Invoke(this, message);
 }

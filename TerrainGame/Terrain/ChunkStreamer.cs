@@ -40,6 +40,13 @@ public sealed class ChunkStreamer : IDisposable
 
     public int Radius => _radius;
 
+    /// <summary>Queues a rebuild for every currently desired chunk.</summary>
+    public void RebuildAll()
+    {
+        foreach (var key in _known)
+            _requests.Writer.TryWrite(key);
+    }
+
     /// <summary>Queues a rebuild for every given chunk key.</summary>
     public void Rebuild(IEnumerable<long> keys)
     {

@@ -76,6 +76,19 @@ internal sealed unsafe class WindowsVulkanHost : IDisposable
     private void OnPanelSizeChanged(object sender, Microsoft.UI.Xaml.SizeChangedEventArgs e)
         => _sizeDirty = true;
 
+    public void EnsureTarget()
+    {
+        if (_context is null)
+        {
+            _sizeDirty = true;
+            return;
+        }
+
+        _scene ??= _handler.CurrentScene;
+        if (_scene is not null)
+            _scene.OnTargetCreated(CreateTargetInfo());
+    }
+
     public void RequestFrame()
     {
         if (_disposed || _scene is null)

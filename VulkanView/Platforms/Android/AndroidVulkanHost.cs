@@ -270,6 +270,17 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         ImageViews = _imageViews,
     };
 
+    public void EnsureTarget()
+    {
+        _scene ??= _handler.CurrentScene;
+        if (_context is null || _scene is null)
+            return;
+
+        State("EnsureTarget: re-notifying scene");
+        _scene.OnTargetCreated(CreateTargetInfo());
+        _targetNotified = true;
+    }
+
     public void RequestFrame()
     {
         if (_disposed)

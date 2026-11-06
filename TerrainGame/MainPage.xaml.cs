@@ -38,6 +38,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     private string? _pageDiag;
     private int _renderCalls;
     private int _queuedChunks;
+    private TimeSpan _lastEnsure;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -98,6 +99,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         _flipY = target.FlipY;
         _errorText = null;
         _pageDiag = "target created";
+        _streamer?.RebuildAll();
         StatusLabel.Text = $"Vulkan target {target.Extent.Width}x{target.Extent.Height}";
     }
 
@@ -112,6 +114,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     {
         _terrain?.Dispose();
         _terrain = null;
+        _pageDiag = "target destroyed";
     }
 
     public void Render(VulkanFrameContext frame)
@@ -153,6 +156,12 @@ public partial class MainPage : ContentPage, IVulkanScene
                 _terrain.SetCamera(view * projection, _camera.Position);
             }
 
+            if (_terrain is null && now - _lastEnsure > TimeSpan.FromSeconds(1))
+            {
+                _lastEnsure = now;
+                GameView.EnsureTarget();
+            }
+
             GameView.RequestFrame();
 
             _frameCount++;
@@ -171,7 +180,8 @@ public partial class MainPage : ContentPage, IVulkanScene
                     $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
                     $"modified {_streamer.World.ModifiedChunkCount}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}  " +
-                    $"page: {_pageDiag ?? "?"} renders {_renderCalls} queued {_queuedChunks}  " +
+                    $"page: {_pageDiag ?? "?"} renders {_renderCalls} queued {_queuedChunks} " +
+                    $"terrain={(_terrain is null ? "null" : $"ok r{_terrain.RenderCalls} c{_terrain.ChunkCount} ht{( _terrain.HasTarget ? 1 : 0)}")}  " +
                     $"host: {_diagnostics ?? "none"}" +
                     (_errorText is null ? string.Empty : $"  ERR: {_errorText}");
             }

@@ -80,6 +80,8 @@ public sealed unsafe class TerrainRenderer : IVulkanScene, IDisposable
     }
 
     public int ChunkCount => _chunks.Count;
+    public int RenderCalls { get; private set; }
+    public bool HasTarget => _hasTarget;
 
     public void SetChunk(long key, TerrainVertex[] vertices)
     {
@@ -115,6 +117,7 @@ public sealed unsafe class TerrainRenderer : IVulkanScene, IDisposable
 
     public void Render(VulkanFrameContext frame)
     {
+        RenderCalls++;
         if (!_hasTarget)
             return;
 
