@@ -28,12 +28,26 @@ public class VulkanViewHandler : ViewHandler<global::VulkanView.VulkanView, Swap
     protected override void ConnectHandler(SwapChainPanel platformView)
     {
         base.ConnectHandler(platformView);
+        platformView.PointerPressed += OnPointerPressed;
+        platformView.PointerReleased += OnPointerReleased;
+        platformView.PointerCanceled += OnPointerReleased;
+        platformView.PointerCaptureLost += OnPointerReleased;
         _host = new WindowsVulkanHost(platformView, this);
         _host.SetScene(VirtualView?.Scene);
     }
 
+    private void OnPointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        => VirtualView?.RaisePressBegan();
+
+    private void OnPointerReleased(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        => VirtualView?.RaisePressEnded();
+
     protected override void DisconnectHandler(SwapChainPanel platformView)
     {
+        platformView.PointerPressed -= OnPointerPressed;
+        platformView.PointerReleased -= OnPointerReleased;
+        platformView.PointerCanceled -= OnPointerReleased;
+        platformView.PointerCaptureLost -= OnPointerReleased;
         _host?.Dispose();
         _host = null;
         base.DisconnectHandler(platformView);

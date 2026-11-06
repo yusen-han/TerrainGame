@@ -80,6 +80,8 @@ public partial class MainPage : ContentPage, IVulkanScene
 
         GameView.Scene = this;
         _pageDiag = $"loaded handler={GameView.Handler?.GetType().Name ?? "null"} scene={(GameView.Scene is null ? "null" : "set")}";
+        GameView.PressBegan += (_, _) => BeginPress();
+        GameView.PressEnded += (_, _) => EndPress();
         GameView.RenderError += (_, message) => _errorText = message;
         GameView.DiagnosticsChanged += (_, _) => _diagnostics = GameView.Diagnostics;
 
@@ -319,10 +321,21 @@ public partial class MainPage : ContentPage, IVulkanScene
 
     private void OnPointerPressed(object? sender, PointerEventArgs e)
     {
-        _pointerDown = true;
+        BeginPress();
         _lastPointer = e.GetPosition(GameView);
+    }
+
+    private void BeginPress()
+    {
+        _pointerDown = true;
         _pressStart = _clock.Elapsed;
         _lastDig = _pressStart;
+    }
+
+    private void EndPress()
+    {
+        _pointerDown = false;
+        _lastPointer = null;
     }
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
@@ -377,8 +390,7 @@ public partial class MainPage : ContentPage, IVulkanScene
 
     private void OnPointerReleased(object? sender, PointerEventArgs e)
     {
-        _pointerDown = false;
-        _lastPointer = null;
+        EndPress();
     }
 
     private void OnUnloaded(object? sender, EventArgs e)

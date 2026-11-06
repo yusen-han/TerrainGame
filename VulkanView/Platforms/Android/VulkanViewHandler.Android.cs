@@ -27,7 +27,11 @@ public class VulkanViewHandler : ViewHandler<global::VulkanView.VulkanView, Surf
         platformView.Visibility = ViewStates.Visible;
         _host = new AndroidVulkanHost(platformView, this);
         if (platformView is VulkanSurfaceView surfaceView)
+        {
             surfaceView.SetCallback(_host);
+            surfaceView.PressBegan = () => VirtualView?.RaisePressBegan();
+            surfaceView.PressEnded = () => VirtualView?.RaisePressEnded();
+        }
         else
             platformView.Holder?.AddCallback(_host);
 
@@ -68,6 +72,29 @@ public class VulkanViewHandler : ViewHandler<global::VulkanView.VulkanView, Surf
 
         public VulkanSurfaceView(Android.Content.Context context) : base(context)
         {
+        }
+
+        public Action? PressBegan { get; set; }
+
+        public Action? PressEnded { get; set; }
+
+        public override bool DispatchTouchEvent(MotionEvent? e)
+        {
+            if (e is not null)
+            {
+                switch (e.ActionMasked)
+                {
+                    case MotionEventActions.Down:
+                        PressBegan?.Invoke();
+                        break;
+                    case MotionEventActions.Up:
+                    case MotionEventActions.Cancel:
+                        PressEnded?.Invoke();
+                        break;
+                }
+            }
+
+            return base.DispatchTouchEvent(e);
         }
 
         public void SetCallback(ISurfaceHolderCallback callback)

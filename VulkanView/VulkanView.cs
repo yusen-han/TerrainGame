@@ -23,6 +23,12 @@ public class VulkanView : View
 
     public event EventHandler? DiagnosticsChanged;
 
+    /// <summary>Fired when a finger/mouse goes down on the surface.</summary>
+    public event EventHandler? PressBegan;
+
+    /// <summary>Fired when the press ends or is cancelled.</summary>
+    public event EventHandler? PressEnded;
+
     private string? _diagnostics;
 
     /// <summary>Last platform/host state, surfaced in the app HUD for debugging.</summary>
@@ -51,4 +57,8 @@ public class VulkanView : View
     }
 
     internal void ReportError(string message) => RenderError?.Invoke(this, message);
+
+    internal void RaisePressBegan() => PressBegan?.Invoke(this, EventArgs.Empty);
+
+    internal void RaisePressEnded() => PressEnded?.Invoke(this, EventArgs.Empty);
 }
