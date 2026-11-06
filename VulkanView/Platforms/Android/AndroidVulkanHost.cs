@@ -29,6 +29,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
     private ImageView[] _imageViews = Array.Empty<ImageView>();
     private IntPtr _nativeWindow;
     private bool _disposed;
+    private bool _targetNotified;
 
     private void State(string message)
     {
@@ -57,15 +58,20 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     public void SetScene(IVulkanScene? scene)
     {
+        State($"SetScene {(scene is null ? "null" : "ok")}");
         if (ReferenceEquals(_scene, scene))
             return;
 
         _scene?.OnTargetDestroyed();
         _scene = scene;
+        _targetNotified = false;
         State($"scene set: {(_scene is null ? "null" : "ok")}");
 
         if (_context is not null && _scene is not null)
+        {
             _scene.OnTargetCreated(CreateTargetInfo());
+            _targetNotified = true;
+        }
     }
 
     public void SurfaceCreated(ISurfaceHolder holder)
@@ -166,7 +172,15 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
         CreateSwapchain();
         State($"swapchain {_extent.Width}x{_extent.Height} {_format}");
-        _scene?.OnTargetCreated(CreateTargetInfo());
+
+        _scene ??= _handler.CurrentScene;
+        State($"target ready, scene={(_scene is null ? "null" : "ok")}");
+
+        if (_scene is not null)
+        {
+            _scene.OnTargetCreated(CreateTargetInfo());
+            _targetNotified = true;
+        }
     }
 
     private void CreateSwapchain()
@@ -263,6 +277,14 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
         {
             if (_context is null)
                 EnsureInitialized();
+
+            _scene ??= _handler.CurrentScene;
+
+            if (_scene is not null && !_targetNotified)
+            {
+                _scene.OnTargetCreated(CreateTargetInfo());
+                _targetNotified = true;
+            }
 
             if (_context is null || _scene is null || _swapchain.Handle == 0)
                 return;
@@ -365,6 +387,7 @@ internal sealed unsafe class AndroidVulkanHost : Java.Lang.Object, ISurfaceHolde
 
     private void DestroyContext()
     {
+        _targetNotified = false;
         _context?.Dispose();
         _context = null;
         _surfaceApi = null;

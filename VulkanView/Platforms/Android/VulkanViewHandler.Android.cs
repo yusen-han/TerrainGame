@@ -49,6 +49,8 @@ public class VulkanViewHandler : ViewHandler<global::VulkanView.VulkanView, Surf
 
     public void RequestFrame() => _host?.RequestFrame();
 
+    internal IVulkanScene? CurrentScene => VirtualView?.Scene;
+
     internal void ReportError(string message) => VirtualView?.ReportError(message);
 
     internal void ReportDiagnostics(string message)

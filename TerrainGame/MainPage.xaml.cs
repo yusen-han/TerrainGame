@@ -35,6 +35,7 @@ public partial class MainPage : ContentPage, IVulkanScene
     private bool _flipY;
     private string? _errorText;
     private string? _diagnostics;
+    private string? _pageDiag;
 
     private bool _pointerDown;
     private Point? _lastPointer;
@@ -72,7 +73,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         }
 
         GameView.Scene = this;
-        _diagnostics = GameView.Handler is VulkanViewHandler ? "handler ok" : "handler MISSING";
+        _pageDiag = $"loaded handler={GameView.Handler?.GetType().Name ?? "null"} scene={(GameView.Scene is null ? "null" : "set")}";
         GameView.RenderError += (_, message) => _errorText = message;
         GameView.DiagnosticsChanged += (_, _) => _diagnostics = GameView.Diagnostics;
 
@@ -94,6 +95,7 @@ public partial class MainPage : ContentPage, IVulkanScene
         _aspect = target.AspectRatio;
         _flipY = target.FlipY;
         _errorText = null;
+        _pageDiag = "target created";
         StatusLabel.Text = $"Vulkan target {target.Extent.Width}x{target.Extent.Height}";
     }
 
@@ -163,7 +165,7 @@ public partial class MainPage : ContentPage, IVulkanScene
                     $"chunks {_terrain?.ChunkCount ?? 0}  fps {_fps:F0}  " +
                     $"modified {_streamer.World.ModifiedChunkCount}  " +
                     $"pos {_camera.Position.X:F0},{_camera.Position.Y:F0},{_camera.Position.Z:F0}  " +
-                    $"diag: {_diagnostics ?? "none"}" +
+                    $"page: {_pageDiag ?? "?"}  host: {_diagnostics ?? "none"}" +
                     (_errorText is null ? string.Empty : $"  ERR: {_errorText}");
             }
         }
